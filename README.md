@@ -1,4 +1,4 @@
-# ism-wifi-monitor
+# pi4-cyberdeck
 
 > **Legal and ethical notice**
 >
@@ -22,9 +22,10 @@
 ---
 
 A passive radio monitoring platform for Raspberry Pi 4B. Captures and analyses
-802.11 WiFi frames, ISM band radio signals (433/868/315 MHz), and GPS data.
-Runs completely headless — the Pi serves its own browser-based UI over a WiFi
-hotspot. No cloud, no external services, no display required.
+802.11 WiFi frames, ISM band radio signals (433/868/315 MHz), wideband SDR
+signals via a waterfall receiver, and GPS data. Runs completely headless — the
+Pi serves its own browser-based UI over a WiFi hotspot. No cloud, no external
+services, no display required.
 
 ---
 
@@ -53,6 +54,13 @@ weather stations, TPMS tyre pressure sensors, remote controls, smart meters,
 door bells and many other devices. Decoded signals are displayed in a live feed
 with GPS tagging and plotted on a map.
 
+### SDR waterfall receiver (FerroSDR)
+A wideband software-defined radio receiver with a browser-based waterfall
+display. Tune to any frequency, adjust bandwidth and gain, and watch signals
+appear in real time. Frequency presets can be saved and recalled. FerroSDR and
+the ISM monitor share the RTL-SDR dongle and cannot run simultaneously — use
+the Services page to switch between them.
+
 ### GPS
 A u-blox USB GPS receiver provides real-time position for geotagging all WiFi
 sightings and ISM signals. A 3D satellite skymap shows satellite positions and
@@ -70,24 +78,14 @@ been in range and which networks they have previously connected to.
 
 ## Hardware
 
-### Tested configurations
-
-| Component | Pi 4B (raspi81) | Pi Zero 2W (raspi82) |
-|---|---|---|
-| Host | Raspberry Pi 4B 4GB | Raspberry Pi Zero 2W 1GB |
-| Hotspot | Onboard BCM43455 (wlan0) | Onboard BCM43438 (wlan0) |
-| WiFi monitor | MT7612U USB dongle (wlan1) | MT7612U USB dongle (wlan1) |
-| ISM radio | RTL-SDR Blog V3 dongle | RTL-SDR Blog V3 dongle (optional) |
-| GPS | Geekstory G72 u-blox M8130 | Geekstory G72 u-blox M8130 |
-| USB hub | Not required | Powered USB hub (essential) |
-| Ethernet | Optional | USB ethernet dongle (for setup) |
-
-### Why a powered USB hub on Pi Zero 2W?
-
-The Pi Zero 2W has a single USB 2.0 OTG port. With GPS, WiFi dongle and
-optionally RTL-SDR all connected simultaneously, a passive hub cannot supply
-enough current. A powered hub is mandatory — without it you will see USB
-device resets and GPS signal loss under load.
+| Component | Value |
+|---|---|
+| Host | Raspberry Pi 4B 4GB |
+| Hotspot | Onboard BCM43455 (wlan0) |
+| WiFi monitor | MT7612U USB dongle (wlan1) |
+| ISM radio / SDR | RTL-SDR Blog V3 dongle |
+| GPS | Geekstory G72 u-blox M8130 |
+| Ethernet | Optional (for setup and internet passthrough) |
 
 ### MT7612U WiFi adapter
 
@@ -100,8 +98,8 @@ changes its channel.
 ### RTL-SDR dongle
 
 Any RTL2832U based SDR dongle will work. The RTL-SDR Blog V3 has better
-sensitivity and an improved oscillator. On Pi Zero 2W the RTL-SDR and MT7612U
-**cannot run simultaneously** due to USB bandwidth constraints — use the
+sensitivity and an improved oscillator. The dongle is shared between the ISM
+monitor (rtl_433) and FerroSDR — only one can use it at a time. Use the
 Services page to stop one before starting the other.
 
 ### GPS receiver
@@ -124,16 +122,32 @@ severely degraded GPS performance with weak or no satellite reception.
 
 The Pi serves its UI over a WiFi hotspot (wlan0) rather than relying on an
 existing network. This makes the system completely self-contained and portable
-— you connect your laptop or phone directly to the Pi's hotspot and access
-the UI at `http://10.42.0.1`. The Pi also works on an existing Ethernet
-network (accessible by its Ethernet IP) but the hotspot is always available
-regardless of network infrastructure.
+— connect your laptop or phone directly to the Pi's hotspot and access the UI
+at `http://10.42.0.1`. The Pi also works on an existing Ethernet network
+(accessible by its Ethernet IP) but the hotspot is always available regardless
+of network infrastructure.
+
+Hotspot clients get internet access via NAT masquerade over Ethernet when an
+Ethernet cable is plugged in (configured by `config/nftables.conf`).
+
+### 5 GHz hotspot and DFS
+
+The hotspot is configured on channel 100 (5500 MHz) with 80 MHz width. This
+band (5470–5725 MHz) is approved for outdoor use in Germany and across the EU
+under ETSI EN 301 893 V2.1.1 and Commission Implementing Decision (EU)
+2021/1067.
+
+Radar detection (DFS) is mandatory in this band. On boot, hostapd performs a
+60-second radar scan before activating the AP. This is normal — the hotspot
+will appear approximately 60 seconds after boot. The `ieee80211h=1` flag
+enables Transmit Power Control (TPC) as also required by regulation.
 
 ### Port layout
 
 | Port | Service | Technology |
 |---|---|---|
 | 80 | Landing page | aiohttp |
+| 8080 | FerroSDR waterfall receiver | FerroSDR (Rust binary) |
 | 8091 | WiFi web (APs, channels, map) | Flask |
 | 8092 | ISM monitor (live feed, map) | aiohttp + WebSocket |
 | 8093 | GPS dashboard | Flask |
@@ -239,10 +253,10 @@ under sustained use.
 
 ### Flash and configure the Pi
 
-Use **Raspberry Pi Imager** to flash Raspberry Pi OS Bookworm Lite (32-bit
-recommended for Pi Zero 2W, 64-bit fine for Pi 4B). In the Imager settings:
+Use **Raspberry Pi Imager** to flash **Raspberry Pi OS Bookworm Lite (64-bit)**
+for Pi 4B. In the Imager settings:
 
-- Set hostname (e.g. `raspi81` or `raspi82`)
+- Set hostname (e.g. `pi4-cyberdeck`)
 - Enable SSH with a password or public key
 - Set your WiFi credentials for initial internet access
 - Set WiFi country to your country code (e.g. `DE` for Germany)
@@ -252,48 +266,86 @@ obsolete in Bookworm. Use the Imager settings form only.
 
 ### SSH in and update
 
-```bash
+```
 ssh user@<ip-address>
 sudo apt update && sudo apt upgrade -y
 ```
 
 ### Clone and install
 
-**Pi 4B:**
-```bash
-git clone https://github.com/fotografm/ism-wifi-monitor.git
-cd ism-wifi-monitor
-sudo bash install.sh
 ```
-
-**Pi Zero 2W:**
-```bash
-sudo apt install -y git
-git clone https://github.com/fotografm/ism-wifi-monitor.git
-cd ism-wifi-monitor
-sudo bash install_pizero.sh
+git clone https://github.com/fotografm/pi4-cyberdeck.git
+cd pi4-cyberdeck
+sudo bash install.sh
 ```
 
 The install script will:
 1. Install system packages (`gpsd`, `rtl-433`, `iw`, `rfkill`, `sqlite3`)
-2. Detect the MT7612U interface name and patch `config.py` if not `wlan1`
-3. Create the deployment directory and copy all files
-4. Create a Python venv and install dependencies
-5. Download the IEEE OUI database for vendor lookup
-6. Initialise all SQLite databases
-7. Configure gpsd to use `/dev/ttyACM0`
-8. Enable WiFi, bring up wlan0, set the hotspot SSID to the hostname
-9. Create the hotspot if it does not exist (password: `password`)
-10. Mark the monitor interface as unmanaged in NetworkManager
-11. Install and enable all systemd services
+2. Create the deployment directory and copy all files
+3. Create a Python venv and install dependencies
+4. Download the IEEE OUI database for vendor lookup
+5. Initialise all SQLite databases
+6. Configure gpsd to use `/dev/ttyACM0`
+7. Mark wlan1 as unmanaged in NetworkManager
+8. Install and enable all systemd services
 
 After install:
-```bash
+```
 sudo systemctl start rfkill-unblock ism-wifi-landing ism-wifi-gps \
-  ism-wifi-wifi-scan ism-wifi-wifi-web ism-wifi-history-monitor \
-  ism-wifi-history-web ism-wifi-terminal ism-wifi-notes ism-wifi-services
+  ism-wifi-ism ism-wifi-skymap3d ism-wifi-wifi-scan ism-wifi-wifi-web \
+  ism-wifi-history-monitor ism-wifi-history-web \
+  ism-wifi-terminal ism-wifi-notes ism-wifi-services
 sudo reboot
 ```
+
+### Configure the hotspot
+
+The `config/hostapd.conf` in this repo is the reference hostapd configuration
+for the 5 GHz hotspot. If hostapd is not already configured on your Pi:
+
+```
+sudo cp config/hostapd.conf /etc/hostapd/hostapd.conf
+sudo systemctl enable hostapd
+sudo reboot
+```
+
+The SSID defaults to `raspi83` — edit the file to match your hostname before
+copying. The default password is `password`.
+
+### Configure internet passthrough (optional)
+
+If you want hotspot clients to share the Pi's Ethernet internet connection:
+
+```
+sudo cp config/nftables.conf /etc/nftables.conf
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+sudo systemctl enable nftables
+sudo systemctl start nftables
+```
+
+### Install FerroSDR (optional)
+
+FerroSDR is a Rust-based wideband SDR waterfall receiver. The pre-built static
+binary for Pi 4B (ARM 32-bit musl) can be deployed manually:
+
+```
+sudo systemctl stop ism-wifi-ism
+cp ferrosdr /home/user/ism-wifi-monitor/ferrosdr
+chmod +x /home/user/ism-wifi-monitor/ferrosdr
+cp profiles.json /home/user/ism-wifi-monitor/profiles.json
+sudo cp systemd/ferrosdr.service /etc/systemd/system/
+sudo cp systemd/ferrosdr-watchdog.service /etc/systemd/system/
+sudo cp systemd/ferrosdr-watchdog.timer /etc/systemd/system/
+sudo cp systemd/99-rtlsdr-power.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo systemctl daemon-reload
+sudo systemctl enable ferrosdr ferrosdr-watchdog.timer
+```
+
+FerroSDR and the ISM monitor (`ism-wifi-ism`) share the RTL-SDR dongle and
+have a systemd `Conflicts=` relationship — starting one will stop the other.
+Use the Services page at port 8098 to switch between them.
 
 ### Access the UI
 
@@ -302,7 +354,7 @@ Password: `password`
 
 > **Change the default password** before deploying in any environment where
 > unauthorised access would be a concern:
-> ```bash
+> ```
 > sudo nano /etc/hostapd/hostapd.conf   # edit wpa_passphrase=
 > sudo systemctl restart hostapd
 > ```
@@ -344,10 +396,21 @@ and many others — see the rtl_433 documentation for the full device list.
 If the RTL-SDR is not connected the ISM services will fail silently. Stop them
 from the Services page at port 8098 to avoid log spam.
 
-**Pi Zero 2W:** The MT7612U and RTL-SDR cannot run simultaneously. The MT7612U
-uses too much USB bandwidth when combined with the RTL-SDR's IQ stream. Use
-the Services page to stop one before starting the other, then physically swap
-the dongles.
+The RTL-SDR dongle is shared between the ISM monitor and FerroSDR. Only one
+can hold the device at a time. Use the Services page to stop one before
+starting the other.
+
+---
+
+## FerroSDR notes
+
+FerroSDR listens on port 8080 and serves a browser-based waterfall display.
+Tune by clicking the frequency bar or entering a value directly. Frequency
+presets (profiles) are saved to `profiles.json` in the deploy directory.
+
+The FerroSDR USB watchdog (`ferrosdr-watchdog.timer`) monitors the service
+and automatically restarts it if the RTL-SDR USB device becomes unresponsive.
+This runs independently in the background and does not need manual management.
 
 ---
 
@@ -369,10 +432,10 @@ The Services page at `http://<ip>:8098` provides:
 
 ### Changing the hotspot SSID and password
 
-```bash
-sudo nmcli con modify <connection-name> 802-11-wireless.ssid "new-ssid"
-sudo nmcli con modify <connection-name> wifi-sec.psk "new-password"
-sudo nmcli con up <connection-name>
+Edit `/etc/hostapd/hostapd.conf` and restart hostapd:
+```
+sudo nano /etc/hostapd/hostapd.conf
+sudo systemctl restart hostapd
 ```
 
 ### Changing the monitor interface
@@ -380,12 +443,12 @@ sudo nmcli con up <connection-name>
 If the MT7612U enumerates as something other than `wlan1`, update
 `/home/user/ism-wifi-monitor/config.py`:
 
-```python
+```
 WIFI_IFACE = 'wlan2'  # or whatever iw dev shows
 ```
 
 Then update the NM unmanaged config:
-```bash
+```
 sudo bash -c 'echo "[keyfile]
 unmanaged-devices=interface-name:wlan2" > /etc/NetworkManager/conf.d/99-ism-wifi-unmanaged.conf'
 sudo systemctl reload NetworkManager
@@ -412,7 +475,7 @@ offline use.
 ### Services not starting
 
 Check the journal:
-```bash
+```
 sudo journalctl -u ism-wifi-wifi-scan --since "5 min ago" --no-pager
 ```
 
@@ -421,6 +484,12 @@ Common causes:
 - `name '_parse_ssid' is not defined` — redeploy `wifi_scanner.py` from the repo
 - `no such table: associations` — the database was not initialised, run
   `python3 db_wifi.py` from the venv
+
+### Hotspot not appearing after reboot
+
+The 5 GHz hotspot (channel 100) performs a mandatory 60-second DFS radar scan
+before activating. This is normal — wait 60–90 seconds after boot before
+expecting the SSID to appear.
 
 ### GPS not working
 
@@ -433,8 +502,6 @@ Common causes:
 
 - Check `iw dev` shows wlan1 in monitor mode
 - Check `sudo systemctl status ism-wifi-wifi-scan` for errors
-- The Pi Zero 2W's onboard WiFi being active as a hotspot can cause minor
-  interference but should not prevent the MT7612U from working
 
 ### Web UI not loading
 
@@ -447,7 +514,7 @@ Common causes:
 ## File structure
 
 ```
-ism-wifi-monitor/
+pi4-cyberdeck/
 ├── config.py                   # All configuration constants
 ├── db_wifi.py                  # WiFi database schema + init
 ├── db_history.py               # WiFi history database schema + init
@@ -469,7 +536,9 @@ ism-wifi-monitor/
 ├── services_server.py          # Services control aiohttp server (port 8098)
 ├── raspi-style.css             # Shared dark theme stylesheet
 ├── install.sh                  # Installer for Pi 4B
-├── install_pizero.sh           # Installer for Pi Zero 2W
+├── config/
+│   ├── hostapd.conf            # 5 GHz hotspot configuration (channel 100, DFS)
+│   └── nftables.conf           # NAT masquerade for hotspot internet passthrough
 ├── data/
 │   └── oui.csv                 # IEEE OUI vendor database
 ├── templates/                  # Jinja2 / standalone HTML templates
@@ -480,7 +549,7 @@ ism-wifi-monitor/
 │   ├── wifi_map.html           # Leaflet AP map
 │   ├── ism_feed.html           # Live ISM signal feed
 │   ├── ism_map.html            # ISM transmitter map
-│   ├── ism_settings.html       # ISM settings + tile cache
+│   ├── ism_settings.html       # ISM settings + tile cache + service status
 │   ├── history_base.html       # Shared history page base template
 │   ├── history_index.html      # Recent probe requests
 │   ├── history_ssids.html      # Directed SSID list with device chips
@@ -504,8 +573,15 @@ ism-wifi-monitor/
     ├── ism-wifi-gps.service
     ├── ism-wifi-terminal.service
     ├── ism-wifi-notes.service
-    └── ism-wifi-services.service
+    ├── ism-wifi-services.service
+    ├── ferrosdr.service         # FerroSDR waterfall receiver (port 8080)
+    ├── ferrosdr-watchdog.service
+    ├── ferrosdr-watchdog.timer
+    └── 99-rtlsdr-power.rules   # udev rule for RTL-SDR USB power management
 ```
+
+Note: The `ferrosdr` binary and `profiles.json` are deployed to
+`/home/user/ism-wifi-monitor/` separately and are not tracked in this repo.
 
 ---
 

@@ -297,8 +297,16 @@ sudo reboot
 
 ### Access the UI
 
-Connect your device to the `raspi81` (or `raspi82`) WiFi hotspot.
+Connect your device to the hotspot (SSID = Pi hostname, e.g. `pi4-cyberdeck`).
 Password: `password`
+
+> **Change the default password** before deploying in any environment where
+> unauthorised access would be a concern:
+> ```bash
+> sudo nano /etc/hostapd/hostapd.conf   # edit wpa_passphrase=
+> sudo systemctl restart hostapd
+> ```
+> Also update `config/hostapd.conf` in this repo to match.
 
 Open `http://10.42.0.1` in your browser.
 

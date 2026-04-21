@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>raspi81 &mdash; Notes</title>
+<title>raspi83 &mdash; Notes</title>
 <link rel="stylesheet" href="http://placeholder/raspi-style.css">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,6 +18,8 @@ body { background:var(--bg);color:var(--text);font-family:monospace;font-size:14
 #search-clear.visible { display:block; }
 #search-clear:hover { color:var(--text); }
 #match-count { font-size:11px;color:#aaaaee;white-space:nowrap;min-width:60px; }
+#back-btn { background:#0d0d30;border:1px solid #5566cc;border-radius:3px;color:#aabbff;font-family:monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:5px 13px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background 0.15s,border-color 0.15s;text-decoration:none; }
+#back-btn:hover { background:#1a1a50;border-color:#8899ff;color:#ccddff; }
 #new-btn { background:#0d0d30;border:1px solid #5566cc;border-radius:3px;color:#aabbff;font-family:monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:5px 13px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background 0.15s,border-color 0.15s; }
 #new-btn:hover { background:#1a1a50;border-color:#8899ff;color:#ccddff; }
 #titlebar-spacer { flex:1; }
@@ -52,7 +54,8 @@ mark { background:#3a3a00;color:#ffff66;border-radius:2px;padding:0 1px; }
 </head>
 <body>
 <div id="titlebar">
-    <h1>raspi81 &mdash; Notes</h1>
+    <a id="back-btn" href="#" onclick="window.location.href='http://'+location.hostname;return false;">&#8592; Home</a>
+    <h1>raspi83 &mdash; Notes</h1>
     <div id="search-wrap">
         <input id="search" type="text" placeholder="Search&hellip;"
                oninput="onSearch(this.value)" autocomplete="off" spellcheck="false">

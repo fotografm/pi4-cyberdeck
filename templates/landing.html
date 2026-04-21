@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>raspi81 CYBERDECK</title>
+<title>raspi83 CYBERDECK</title>
 <link rel="stylesheet" href="/raspi-style.css">
 <style>
 body { display:flex; flex-direction:column; align-items:center;
@@ -113,7 +113,7 @@ body { display:flex; flex-direction:column; align-items:center;
 
 <div class="page-title">
     <span>📡 CYBERDECK</span>
-    raspi81
+    raspi83
 </div>
 
 <div id="badges">
@@ -340,8 +340,8 @@ function confirmAction(action) {
         isShutdown ? '\ud83d\udd34 Shutdown' : '\ud83d\udd04 Reboot';
     document.getElementById('modal-msg').textContent =
         isShutdown
-        ? 'This will power off raspi81. Wait 10 seconds before removing power.'
-        : 'This will reboot raspi81.';
+        ? 'This will power off raspi83. Wait 10 seconds before removing power.'
+        : 'This will reboot raspi83.';
     document.getElementById('modal-ok').textContent =
         isShutdown ? 'Shut down' : 'Reboot';
     document.getElementById('modal-bg').classList.add('show');

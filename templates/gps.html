@@ -37,6 +37,15 @@
   .fix-no     { color: var(--red)   !important; }
   #tick       { color: var(--muted); font-size: 12px; }
 
+  /* ── Back button ── */
+  .back-btn {
+    padding: 4px 12px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted);
+    border-radius: 4px; text-decoration: none; font-size: 11px;
+    flex-shrink: 0; font-family: inherit;
+  }
+  .back-btn:hover { background: var(--border); color: var(--text); }
+
   /* ── Shutdown button ── */
   #shutdown-btn {
     margin-left: auto;
@@ -164,6 +173,7 @@
 </div>
 
 <header>
+  <a href="#" onclick="window.location.href='http://'+location.hostname;return false;" class="back-btn">&#8592; Home</a>
   <h1>🛰 GPS Dashboard</h1>
   <div class="hstat">Fix: <span id="h-fix" class="fix-no">—</span></div>
   <div class="hstat">Mode: <span id="h-mode">—</span></div>

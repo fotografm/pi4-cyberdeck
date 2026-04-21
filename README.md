@@ -21,7 +21,7 @@
 
 ---
 
-A passive radio monitoring platform for Raspberry Pi. Captures and analyses
+A passive radio monitoring platform for Raspberry Pi 4B. Captures and analyses
 802.11 WiFi frames, ISM band radio signals (433/868/315 MHz), and GPS data.
 Runs completely headless — the Pi serves its own browser-based UI over a WiFi
 hotspot. No cloud, no external services, no display required.

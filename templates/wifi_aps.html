@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi APs &#8212; raspi81</title>
+<link rel="stylesheet" href="/raspi-style.css">
+<style>
+body { padding: 0; }
+#topbar { display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-dim);background:var(--panel);margin-bottom:16px; }
+#topbar h1 { font-size:13px;color:var(--heading);letter-spacing:2px;text-transform:uppercase;white-space:nowrap; }
+.back-btn { padding:4px 12px;border:1px solid var(--btn-border);background:var(--btn-bg);color:var(--btn-label);border-radius:4px;text-decoration:none;font-size:11px;flex-shrink:0; }
+.back-btn:hover { background:var(--btn-bg-h); }
+#tick { font-size:10px;color:var(--dim);margin-left:auto; }
+.content { padding:0 14px 14px; }
+.filter-bar { display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap; }
+.filter-bar input { background:var(--input-bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;padding:4px 8px;border-radius:3px;width:260px; }
+.filter-bar button { background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--btn-label);font-family:inherit;font-size:10px;padding:4px 10px;cursor:pointer;border-radius:3px; }
+.filter-bar button:hover { background:var(--btn-bg-h); }
+#ap-count { font-size:10px;color:var(--dim); }
+.rssi-good { color:var(--value-green); }
+.rssi-ok   { color:var(--value-warn); }
+.rssi-weak { color:var(--value-alert); }
+.rssi-none { color:var(--dim); }
+.enc-open  { color:var(--value-alert); }
+.enc-wpa   { color:var(--value-green); }
+th { cursor:pointer;user-select:none; }
+th:hover { color:var(--heading); }
+th.sort-asc::after  { content:" \2191";color:var(--value-green); }
+th.sort-desc::after { content:" \2193";color:var(--value-green); }
+tr.new-row { background-color:#1a1a38;transition:none; }
+tr { transition:background-color 1.4s ease; }
+tr.ap-row { cursor:pointer; }
+tr.ap-row:hover td { background:rgba(74,74,138,0.15); }
+#load-more-btn { display:block;width:100%;margin:12px 0;padding:6px;background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--btn-label);font-family:inherit;font-size:11px;cursor:pointer;border-radius:3px;letter-spacing:1px; }
+#load-more-btn:hover { background:var(--btn-bg-h); }
+</style>
+</head>
+<body>
+<div id="topbar">
+    <a href="#" onclick="window.location.href='http://'+window.location.hostname;return false;" class="back-btn">&#8592; Home</a>
+    <h1>&#128246; WiFi APs</h1>
+    <a href="/map" style="padding:3px 10px;border:1px solid #4a4a9a;background:#0f0f28;color:#aaaadd;border-radius:3px;text-decoration:none;font-size:11px;letter-spacing:1px">&#128506; Map</a>
+    <span id="tick">&#8212;</span>
+</div>
+<div class="content">
+<div class="filter-bar">
+    <input type="text" id="ap-filter" placeholder="Filter&#8230;">
+    <button onclick="applyFilter()">Apply</button>
+    <button onclick="clearFilter()">Clear</button>
+    <span id="ap-count"></span>
+</div>
+<table>
+    <thead><tr>
+        <th onclick="sortBy('ssid')">SSID</th>
+        <th onclick="sortBy('bssid')">BSSID</th>
+        <th onclick="sortBy('manufacturer')">Manufacturer</th>
+        <th onclick="sortBy('channel')">CH</th>
+        <th>Freq</th>
+        <th onclick="sortBy('signal_dbm')">Signal</th>
+        <th onclick="sortBy('encryption')">Enc</th>
+        <th onclick="sortBy('first_seen')">First seen</th>
+        <th onclick="sortBy('last_seen')">Last seen</th>
+        <th onclick="sortBy('seen_count')">Sightings</th>
+    </tr></thead>
+    <tbody id="ap-tbody"></tbody>
+</table>
+<button id="load-more-btn" onclick="loadMore()">Load older APs</button>
+</div>
+<script>
+var allAps=[], sortCol='last_seen', sortDir='desc', filterStr='', knownBssids={};
+var PAGE=200, offset=0, exhausted=false;
+var COL_IDX={ssid:0,bssid:1,manufacturer:2,channel:3,signal_dbm:5,encryption:6,first_seen:7,last_seen:8,seen_count:9};
+
+function rssiClass(v){if(v===null||v===undefined)return 'rssi-none';if(v>=-60)return 'rssi-good';if(v>=-75)return 'rssi-ok';return 'rssi-weak';}
+function encClass(e){return e==='OPEN'?'enc-open':'enc-wpa';}
+function fmtTs(ts){
+    if(!ts)return'\u2014';
+    try{return new Date(ts).toLocaleString('de-DE',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+    catch(e){return ts.replace('T',' ').slice(0,16);}
+}
+function apSearch(ap){return [ap.ssid||'',ap.bssid||'',ap.manufacturer||'',ap.channel!=null?String(ap.channel):'',ap.encryption||'',ap.first_seen||'',ap.last_seen||''].join(' ').toLowerCase();}
+function applyFilter(){filterStr=document.getElementById('ap-filter').value.trim().toLowerCase();renderTable();}
+function clearFilter(){document.getElementById('ap-filter').value='';filterStr='';renderTable();}
+
+function sortBy(col){
+    if(sortCol===col)sortDir=sortDir==='asc'?'desc':'asc'; else{sortCol=col;sortDir='desc';}
+    document.querySelectorAll('thead th').forEach(function(t){t.className='';});
+    var i=COL_IDX[col];if(i!==undefined)document.querySelectorAll('thead th')[i].className='sort-'+sortDir;
+    renderTable();
+}
+
+function makeApRow(ap){
+    var isNew=knownBssids[ap.bssid]!==undefined&&knownBssids[ap.bssid]!==ap.last_seen;
+    var tr=document.createElement('tr');
+    tr.className='ap-row';
+    tr.dataset.bssid=ap.bssid;
+    tr.innerHTML=
+        '<td>'+(ap.ssid||'<span style="color:var(--dim)">[hidden]</span>')+'</td>'+
+        '<td style="font-size:10px;font-family:monospace">'+ap.bssid+'</td>'+
+        '<td style="font-size:11px;color:var(--muted)">'+(ap.manufacturer||'&mdash;')+'</td>'+
+        '<td>'+(ap.channel!=null?ap.channel:'\u2014')+'</td>'+
+        '<td style="color:var(--dim)">'+(ap.frequency_mhz||'\u2014')+'</td>'+
+        '<td class="'+rssiClass(ap.signal_dbm)+'">'+(ap.signal_dbm!=null?ap.signal_dbm:'\u2014')+'</td>'+
+        '<td class="'+encClass(ap.encryption)+'">'+(ap.encryption||'\u2014')+'</td>'+
+        '<td style="color:var(--dim);font-size:11px">'+fmtTs(ap.first_seen)+'</td>'+
+        '<td style="font-size:11px">'+fmtTs(ap.last_seen)+'</td>'+
+        '<td style="color:var(--muted)">'+(ap.seen_count!=null?ap.seen_count:'\u2014')+'</td>';
+    if(isNew){tr.classList.add('new-row');requestAnimationFrame(function(){requestAnimationFrame(function(){tr.classList.remove('new-row');});});}
+    tr.addEventListener('click',function(){ window.location.href='/ap/'+ap.bssid; });
+    knownBssids[ap.bssid]=ap.last_seen;
+    return tr;
+}
+
+function renderTable(){
+    var filtered=allAps.filter(function(ap){return !filterStr||apSearch(ap).indexOf(filterStr)!==-1;});
+    filtered.sort(function(a,b){
+        var av=a[sortCol],bv=b[sortCol];
+        if(av===null||av===undefined)av=sortDir==='asc'?'\uffff':'';
+        if(bv===null||bv===undefined)bv=sortDir==='asc'?'\uffff':'';
+        if(typeof av==='number'&&typeof bv==='number')return sortDir==='asc'?av-bv:bv-av;
+        av=String(av);bv=String(bv);
+        return sortDir==='asc'?(av<bv?-1:av>bv?1:0):(av>bv?-1:av<bv?1:0);
+    });
+    var tbody=document.getElementById('ap-tbody');
+    tbody.innerHTML='';
+    filtered.forEach(function(ap){ tbody.appendChild(makeApRow(ap)); });
+    document.getElementById('ap-count').textContent=filtered.length+' access points';
+}
+
+function fetchAps(){
+    fetch('/api/aps?limit='+PAGE+'&offset=0').then(function(r){return r.json();}).then(function(data){
+        data.forEach(function(ap){
+            var i=allAps.findIndex(function(a){return a.bssid===ap.bssid;});
+            if(i>=0)allAps[i]=ap; else allAps.unshift(ap);
+        });
+        renderTable();
+    }).catch(function(){});
+}
+
+function loadMore(){
+    if(exhausted)return;
+    offset+=PAGE;
+    fetch('/api/aps?limit='+PAGE+'&offset='+offset).then(function(r){return r.json();}).then(function(data){
+        data.forEach(function(ap){
+            if(!allAps.find(function(a){return a.bssid===ap.bssid;}))allAps.push(ap);
+        });
+        if(data.length<PAGE){exhausted=true;var b=document.getElementById('load-more-btn');b.textContent='No more APs';b.disabled=true;}
+        renderTable();
+    }).catch(function(){});
+}
+
+var TICK=5,cd=TICK;
+setInterval(function(){cd--;document.getElementById('tick').textContent='refresh in '+cd+'s';if(cd<=0){cd=TICK;fetchAps();}},1000);
+document.getElementById('ap-filter').addEventListener('keydown',function(e){if(e.key==='Enter')applyFilter();});
+document.querySelectorAll('thead th')[8].className='sort-desc';
+fetchAps();
+</script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi Channel Usage — raspi81</title>
+<link rel="stylesheet" href="/raspi-style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+body { padding: 0; }
+
+#topbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; border-bottom: 1px solid var(--border-dim);
+    background: var(--panel); margin-bottom: 16px;
+}
+#topbar h1 {
+    font-size: 13px; color: var(--heading); letter-spacing: 2px;
+    text-transform: uppercase; white-space: nowrap;
+}
+.back-btn {
+    padding: 4px 12px; border: 1px solid var(--btn-border);
+    background: var(--btn-bg); color: var(--btn-label);
+    border-radius: 4px; text-decoration: none; font-size: 11px; flex-shrink: 0;
+}
+.back-btn:hover { background: var(--btn-bg-h); }
+#tick { font-size: 10px; color: var(--dim); margin-left: auto; }
+.content { padding: 0 14px 14px; }
+
+.stat-row {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.stat {
+    background: var(--panel); border: 1px solid var(--border-dim);
+    border-radius: 4px; padding: 10px 16px; flex: 1; min-width: 100px;
+}
+.stat-label {
+    font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+}
+.stat-val { font-size: 22px; color: var(--value-green); margin-top: 3px; }
+
+.section-title {
+    font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 8px;
+}
+#ch-chart-wrap {
+    height: 120px; margin-bottom: 16px; background: var(--panel);
+    border: 1px solid var(--border-dim); border-radius: 4px; padding: 10px;
+}
+
+.rssi-good { color: var(--value-green); }
+.rssi-ok   { color: var(--value-warn); }
+.rssi-weak { color: var(--value-alert); }
+.rssi-none { color: var(--dim); }
+.enc-open  { color: var(--value-alert); }
+.enc-wpa   { color: var(--value-green); }
+
+tr.new-row { background-color: #1a1a38; transition: none; }
+tr { transition: background-color 1.4s ease; }
+</style>
+</head>
+<body>
+<div id="topbar">
+    <a href="#" onclick="window.location.href='http://'+window.location.hostname;return false;" class="back-btn">&#8592; Home</a>
+    <h1>&#128246; WiFi Channel Usage</h1>
+    <a href="/aps" style="font-size:11px;color:var(--muted);">All APs &#8594;</a>
+    <span id="tick">&#8212;</span>
+</div>
+<div class="content">
+
+<div class="stat-row">
+    <div class="stat">
+        <div class="stat-label">Total APs</div>
+        <div class="stat-val" id="st-total">&#8212;</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">New (24h)</div>
+        <div class="stat-val" id="st-new24">&#8212;</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Uptime</div>
+        <div class="stat-val" id="si-uptime">&#8212;</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">CPU</div>
+        <div class="stat-val" id="si-cpu">&#8212;</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">RAM</div>
+        <div class="stat-val" id="si-ram">&#8212;</div>
+    </div>
+</div>
+
+<div class="section-title">channel distribution</div>
+<div id="ch-chart-wrap"><canvas id="ch-chart"></canvas></div>
+
+<div class="section-title">recently seen</div>
+<table>
+    <thead><tr>
+        <th>SSID</th><th>BSSID</th><th>CH</th><th>Signal</th><th>Enc</th><th>Last seen</th><th>Count</th>
+    </tr></thead>
+    <tbody id="recent-tbody"></tbody>
+</table>
+
+</div>
+
+<script>
+var chart = null;
+var knownBssids = {};
+
+function rssiClass(rssi) {
+    if (rssi === null || rssi === undefined) return 'rssi-none';
+    if (rssi >= -60) return 'rssi-good';
+    if (rssi >= -75) return 'rssi-ok';
+    return 'rssi-weak';
+}
+
+function fmtTs(ts) {
+    if (!ts) return '\u2014';
+    try { return new Date(ts).toLocaleString('de-DE', {timeZone:'Europe/Berlin',
+        year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+    catch(e) { return ts.replace('T',' ').slice(0,16); }
+}
+
+function encClass(enc) {
+    return (enc === 'OPEN') ? 'enc-open' : 'enc-wpa';
+}
+
+function updateStats() {
+    fetch('/api/stats').then(function(r) { return r.json(); }).then(function(d) {
+        document.getElementById('st-total').textContent =
+            d.ap_count !== undefined ? d.ap_count.toLocaleString() : '\u2014';
+    }).catch(function() {});
+
+    fetch('/api/sysinfo').then(function(r) { return r.json(); }).then(function(d) {
+        document.getElementById('si-uptime').textContent = d.uptime || '\u2014';
+        document.getElementById('si-cpu').textContent    = d.cpu    || '\u2014';
+        document.getElementById('si-ram').textContent    =
+            (d.mem && d.mem.pct != null) ? d.mem.pct + '%' : '\u2014';
+    }).catch(function() {});
+}
+
+function updateRecent() {
+    fetch('/api/aps').then(function(r) { return r.json(); }).then(function(aps) {
+        aps.sort(function(a, b) {
+            return (b.last_seen || '').localeCompare(a.last_seen || '');
+        });
+        var recent = aps.slice(0, 15);
+
+        var cutoff = new Date(Date.now() - 86400000).toISOString();
+        var new24 = aps.filter(function(a) {
+            return a.first_seen && a.first_seen > cutoff;
+        }).length;
+        document.getElementById('st-new24').textContent = new24;
+
+        var tbody = document.getElementById('recent-tbody');
+        recent.forEach(function(ap, idx) {
+            var bssid = ap.bssid;
+            var isNew = !knownBssids[bssid] || knownBssids[bssid] !== ap.last_seen;
+            knownBssids[bssid] = ap.last_seen;
+
+            var row = tbody.rows[idx];
+            if (!row) {
+                row = tbody.insertRow(idx);
+                for (var i = 0; i < 7; i++) row.insertCell(i);
+            }
+
+            row.cells[0].textContent = ap.ssid || '[hidden]';
+            row.cells[1].textContent = bssid;
+            row.cells[1].style.fontSize = '10px';
+            row.cells[2].textContent = ap.channel || '\u2014';
+            row.cells[3].textContent = ap.signal_dbm !== null && ap.signal_dbm !== undefined
+                ? ap.signal_dbm : '\u2014';
+            row.cells[3].className = rssiClass(ap.signal_dbm);
+            row.cells[4].textContent = ap.encryption || '\u2014';
+            row.cells[4].className = encClass(ap.encryption);
+            row.cells[5].textContent = fmtTs(ap.last_seen);
+            row.cells[6].textContent = ap.seen_count !== undefined ? ap.seen_count : '\u2014';
+
+            if (isNew) {
+                row.classList.add('new-row');
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() { row.classList.remove('new-row'); });
+                });
+            }
+        });
+
+        while (tbody.rows.length > recent.length) {
+            tbody.deleteRow(tbody.rows.length - 1);
+        }
+
+        updateChart(aps);
+    }).catch(function() {});
+}
+
+function updateChart(aps) {
+    var chCount = {};
+    aps.forEach(function(ap) {
+        var ch = ap.channel;
+        if (ch !== null && ch !== undefined) {
+            chCount[ch] = (chCount[ch] || 0) + 1;
+        }
+    });
+    var channels = Object.keys(chCount).map(Number).sort(function(a, b) { return a - b; });
+    var labels = channels.map(String);
+    var data   = channels.map(function(c) { return chCount[c]; });
+
+    if (!chart) {
+        chart = new Chart(document.getElementById('ch-chart'), {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ data: data,
+                backgroundColor: 'rgba(68,170,68,0.4)',
+                borderColor: '#44aa44', borderWidth: 1 }] },
+            options: {
+                animation: false, responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: '#aaaadd', font: { size: 9 } }, grid: { color: '#1a1a40' } },
+                    y: { ticks: { color: '#aaaadd', font: { size: 9 }, precision: 0 },
+                         grid: { color: '#1a1a40' }, beginAtZero: true }
+                }
+            }
+        });
+    } else {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = data;
+        chart.update('none');
+    }
+}
+
+var TICK = 3;
+var cd = TICK;
+setInterval(function() {
+    cd--;
+    document.getElementById('tick').textContent = 'refresh in ' + cd + 's';
+    if (cd <= 0) {
+        cd = TICK;
+        updateRecent();
+        updateStats();
+    }
+}, 1000);
+
+updateRecent();
+updateStats();
+</script>
+</body>
+</html>

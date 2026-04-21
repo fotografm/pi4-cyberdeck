@@ -137,10 +137,21 @@ band (5470–5725 MHz) is approved for outdoor use in Germany and across the EU
 under ETSI EN 301 893 V2.1.1 and Commission Implementing Decision (EU)
 2021/1067.
 
-Radar detection (DFS) is mandatory in this band. On boot, hostapd performs a
-60-second radar scan before activating the AP. This is normal — the hotspot
-will appear approximately 60 seconds after boot. The `ieee80211h=1` flag
-enables Transmit Power Control (TPC) as also required by regulation.
+Radar detection (DFS) and Transmit Power Control (TPC) are mandatory for this
+band under:
+
+- **ETSI EN 301 893 V2.1.1** — the harmonised EU standard for 5 GHz WLANs,
+  which defines DFS and TPC as mandatory requirements for the 5470–5725 MHz
+  range
+- **Commission Implementing Decision (EU) 2021/1067** — the EU radio spectrum
+  decision that designates 5470–5725 MHz for outdoor WLANs subject to DFS+TPC
+- **BNetzA Vfg. 17/2021** — the German Federal Network Agency implementation
+  confirming outdoor use of this band is permitted under the above conditions
+
+On boot, hostapd performs a 60-second radar scan before activating the AP.
+This is normal — the hotspot will appear approximately 60 seconds after boot.
+The `ieee80211d=1` and `ieee80211h=1` flags in `config/hostapd.conf` enable
+these mandatory features.
 
 ### Port layout
 

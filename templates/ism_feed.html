@@ -24,6 +24,7 @@ body { display:flex; flex-direction:column; height:100vh; overflow:hidden;
 }
 .back-btn:hover { background:var(--btn-bg-h); }
 #freq-badge { font-size:11px; color:var(--muted); white-space:nowrap; }
+#tick { font-size:10px; color:var(--dim); white-space:nowrap; }
 
 #bandbar {
     display:flex; gap:8px; flex-wrap:wrap; padding:7px 14px;
@@ -137,6 +138,7 @@ tr:hover td { background:rgba(74,74,138,0.15); }
     <h1>📡 ISM Live Feed</h1>
     <div id="freq-badge">RX: <span id="freq-val" style="color:var(--value-green);font-weight:bold;">—</span></div>
     <span style="margin-left:auto;font-size:10px;color:var(--muted);letter-spacing:1px;">ALL TIMES UTC</span>
+    <span id="tick">—</span>
 </div>
 
 <div id="bandbar">
@@ -193,6 +195,7 @@ let   activeFilter = 'all';
 let   searchStr    = '';
 let   allRows   = [];
 let   ws, wsRetry;
+const seenKeys  = new Set();  // ts|model|device_id — prevents WebSocket/poll duplicates
 
 function applySearch() {
     searchStr = searchEl.value.trim().toLowerCase();
@@ -262,6 +265,9 @@ function extractData(json_str) {
 }
 
 function addRow(sig, flash) {
+    const key = (sig.ts || '') + '|' + (sig.model || '') + '|' + (sig.device_id || '');
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
     const tr = document.createElement('tr');
     const rssiVal = sig.rssi !== null && sig.rssi !== undefined
         ? sig.rssi.toFixed(1) : '—';
@@ -359,6 +365,19 @@ fetch('/api/signals?limit=500').then(r => r.json()).then(rows => {
     rows.reverse().forEach(sig => addRow(sig, false));
     if (allRows.length === 0) emptyMsg.style.display = 'block';
 }).catch(() => {});
+
+const TICK = 5;
+let cd = TICK;
+setInterval(function() {
+    cd--;
+    document.getElementById('tick').textContent = 'refresh in ' + cd + 's';
+    if (cd <= 0) {
+        cd = TICK;
+        fetch('/api/signals?limit=30').then(r => r.json()).then(rows => {
+            rows.reverse().forEach(sig => addRow(sig, false));
+        }).catch(() => {});
+    }
+}, 1000);
 
 connect();
 </script>

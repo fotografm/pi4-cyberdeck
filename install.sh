@@ -122,8 +122,42 @@ NMEOF
 echo "     wlan1 marked unmanaged by NetworkManager"
 systemctl reload NetworkManager 2>/dev/null || true
 
-# ── 8. Install and enable systemd services ────────────────────────────────────
-echo "[8/8] Installing systemd services"
+# ── 8. Sudoers and shell hardening ───────────────────────────────────────────
+echo "[8/9] Configuring sudoers and shell"
+
+# Allow 'user' to set the system clock and save fake-hwclock without a password.
+# Required by the GPS time-sync code in ism_monitor.py.
+HOSTNAME_SHORT=$(hostname -s)
+cat > "/etc/sudoers.d/${HOSTNAME_SHORT}-date" << 'SUDOEOF'
+user ALL=(ALL) NOPASSWD: /usr/bin/date -s *
+user ALL=(ALL) NOPASSWD: /usr/sbin/fake-hwclock save
+SUDOEOF
+chmod 440 "/etc/sudoers.d/${HOSTNAME_SHORT}-date"
+visudo -c && echo "     sudoers entry written: /etc/sudoers.d/${HOSTNAME_SHORT}-date" \
+           || { echo "ERROR: sudoers syntax check failed"; exit 1; }
+
+# Disable terminal mouse-tracking mode on every prompt and on shell exit.
+# Without this, programs like htop/less/vim that enable mouse tracking and then
+# exit uncleanly (e.g. when SSH drops because this host shuts down) leave the
+# connecting terminal emulator stuck in mouse-report mode, causing the mouse
+# wheel to produce raw escape sequences instead of scrolling.
+BASHRC="/home/user/.bashrc"
+if ! grep -q '_reset_mouse' "$BASHRC" 2>/dev/null; then
+    cat >> "$BASHRC" << 'BASHEOF'
+
+# Disable terminal mouse-tracking on each prompt and on shell exit so that
+# programs which exit uncleanly never leave the remote terminal in mouse-report mode.
+_reset_mouse() { printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l'; }
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }_reset_mouse"
+trap '_reset_mouse' EXIT
+BASHEOF
+    echo "     Mouse-reset added to $BASHRC"
+else
+    echo "     Mouse-reset already present in $BASHRC — skipping"
+fi
+
+# ── 9. Install and enable systemd services ────────────────────────────────────
+echo "[9/9] Installing systemd services"
 cp "$REPO_DIR"/systemd/rfkill-unblock.service            "$SVCDIR/"
 cp "$REPO_DIR"/systemd/ism-wifi-landing.service          "$SVCDIR/"
 cp "$REPO_DIR"/systemd/ism-wifi-gps.service              "$SVCDIR/"

@@ -321,6 +321,14 @@ async def _sync_time_from_gps(iso_time: str) -> None:
         if proc.returncode == 0:
             log.info("System time synced from GPS: %s (drift was %.1fs)",
                      gps_dt.strftime("%Y-%m-%d %H:%M:%S UTC"), drift)
+            # Persist corrected time immediately so next boot starts accurate
+            # even if the device is power-cycled before fake-hwclock's 30-min save.
+            save = await asyncio.create_subprocess_exec(
+                "sudo", "fake-hwclock", "save",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await save.wait()
         else:
             log.warning("GPS time sync failed (date -s returned %d)", proc.returncode)
     except Exception as exc:

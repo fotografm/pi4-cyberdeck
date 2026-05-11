@@ -99,7 +99,8 @@ function sendResize() {
 }
 
 function connect() {
-    ws = new WebSocket('ws://' + location.hostname + ':8096/ws');
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(wsProto + '//' + location.hostname + ':8096/ws');
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = function() {

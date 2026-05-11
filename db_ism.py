@@ -74,6 +74,7 @@ def init_db() -> None:
         _con.execute(ddl)
     _con.commit()
     log.info("ISM database ready: %s", DB_PATH)
+    repair_transmitter_positions()
 
 
 def _ensure() -> sqlite3.Connection:
@@ -126,7 +127,59 @@ def upsert_transmitter(row: dict) -> None:
     con.commit()
 
 
+# ── Maintenance ───────────────────────────────────────────────────────────────
+
+def repair_transmitter_positions(max_gap_minutes: int = 30) -> int:
+    """Back-fill lat/lon for transmitters that were recorded during a GPS dropout.
+
+    For each transmitter with no GPS fix, finds the nearest GPS-fixed signal
+    (by timestamp, any model) within max_gap_minutes and uses its coordinates.
+    Returns the number of transmitters updated.
+    """
+    con = _ensure()
+    no_fix = con.execute(
+        "SELECT model, device_id, last_seen FROM transmitters WHERE last_gps_fix = 0"
+    ).fetchall()
+
+    count = 0
+    for tx in no_fix:
+        ts = tx["last_seen"]
+        row = con.execute(
+            """
+            SELECT lat, lon FROM signals
+            WHERE gps_fix = 1 AND lat IS NOT NULL
+              AND ABS(julianday(ts) - julianday(?)) * 1440 <= ?
+            ORDER BY ABS(julianday(ts) - julianday(?)) ASC
+            LIMIT 1
+            """,
+            (ts, max_gap_minutes, ts),
+        ).fetchone()
+        if row:
+            con.execute(
+                """
+                UPDATE transmitters SET last_lat = ?, last_lon = ?, last_gps_fix = 1
+                WHERE model = ? AND device_id = ?
+                """,
+                (row["lat"], row["lon"], tx["model"], tx["device_id"]),
+            )
+            count += 1
+
+    if count:
+        con.commit()
+        log.info("Repaired GPS position for %d transmitter(s) from nearby signals", count)
+    return count
+
+
 # ── Reads ─────────────────────────────────────────────────────────────────────
+
+def get_last_gps_position() -> dict | None:
+    """Return the most recent GPS-fixed lat/lon from the signals table, or None."""
+    con = _ensure()
+    row = con.execute(
+        "SELECT lat, lon, ts FROM signals WHERE gps_fix=1 AND lat IS NOT NULL ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return dict(row) if row else None
+
 
 def get_recent_signals(limit: int = 200) -> list[dict]:
     con = _ensure()

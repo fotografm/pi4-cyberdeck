@@ -98,6 +98,26 @@ html, body { height: 100%; margin: 0; padding: 0; background: #080818; }
 .leg-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
 .leg-row:last-child { margin-bottom: 0; }
 .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* Search overlay */
+#ap-search-wrap {
+    position: fixed; top: 52px; right: 10px; z-index: 1001;
+    display: flex; align-items: center; gap: 4px;
+    background: rgba(8,8,24,0.92); border: 1px solid #4a4a8a;
+    border-radius: 4px; padding: 5px 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+#ap-search {
+    background: transparent; border: none; outline: none;
+    color: #c8d2e8; font-family: inherit; font-size: 11px; width: 180px;
+}
+#ap-search::placeholder { color: #7878aa; }
+#ap-search-clear {
+    background: none; border: none; color: #7878aa; cursor: pointer;
+    font-size: 12px; padding: 0 2px; line-height: 1;
+}
+#ap-search-clear:hover { color: #c8d2e8; }
+#ap-search-count { font-size: 10px; color: #7878aa; white-space: nowrap; min-width: 52px; }
 </style>
 </head>
 <body>
@@ -114,6 +134,13 @@ html, body { height: 100%; margin: 0; padding: 0; background: #080818; }
 </div>
 
 <div id="map"></div>
+
+<div id="ap-search-wrap">
+    <span style="font-size:11px;color:#7878aa;margin-right:2px;">🔍</span>
+    <input type="text" id="ap-search" placeholder="Search SSID / BSSID…">
+    <button id="ap-search-clear" title="Clear search">✕</button>
+    <span id="ap-search-count"></span>
+</div>
 
 <div id="legend">
     <div class="leg-row"><div class="leg-dot" style="background:#ff6666"></div>Open</div>
@@ -162,7 +189,7 @@ function makeIcon(enc) {
 function fmtTs(ts) {
     if (!ts) return '—';
     var d = (typeof ts === 'number') ? new Date(ts * 1000) : new Date(ts);
-    try { return isNaN(d) ? String(ts) : d.toLocaleString('de-DE', {timeZone:'Europe/Berlin',
+    try { return isNaN(d) ? String(ts) : d.toLocaleString('en-GB', {timeZone:'UTC',
         year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
     catch(e) { return isNaN(d) ? String(ts) : d.toISOString().replace('T',' ').slice(0,16); }
 }
@@ -177,7 +204,7 @@ function encClass(enc) {
 }
 
 // ── AP markers ────────────────────────────────────────────────────────────────
-var apMarkers = {};
+var apMarkers = {};  // bssid → { marker, ap }
 
 function loadAPs() {
     fetch('/api/ap_locations').then(function(r){ return r.json(); }).then(function(aps){
@@ -187,7 +214,8 @@ function loadAPs() {
         aps.forEach(function(ap) {
             seen[ap.bssid] = true;
             if (apMarkers[ap.bssid]) {
-                apMarkers[ap.bssid].setLatLng([ap.latitude, ap.longitude]);
+                apMarkers[ap.bssid].marker.setLatLng([ap.latitude, ap.longitude]);
+                apMarkers[ap.bssid].ap = ap;
                 return;
             }
             var m = L.marker([ap.latitude, ap.longitude], { icon: makeIcon(ap.encryption) });
@@ -203,14 +231,55 @@ function loadAPs() {
                 '</div>';
             m.bindPopup(popup, { maxWidth: 280, className: 'ap-dark-popup' });
             m.addTo(map);
-            apMarkers[ap.bssid] = m;
+            apMarkers[ap.bssid] = { marker: m, ap: ap };
         });
 
         Object.keys(apMarkers).forEach(function(bssid) {
-            if (!seen[bssid]) { map.removeLayer(apMarkers[bssid]); delete apMarkers[bssid]; }
+            if (!seen[bssid]) { map.removeLayer(apMarkers[bssid].marker); delete apMarkers[bssid]; }
         });
+
+        // Re-apply active search after each reload
+        var q = document.getElementById('ap-search').value;
+        if (q) searchAPs(q);
     }).catch(function(){});
 }
+
+// ── AP search ─────────────────────────────────────────────────────────────────
+function searchAPs(query) {
+    var q = query.trim().toLowerCase();
+    var countEl = document.getElementById('ap-search-count');
+    if (!q) {
+        Object.values(apMarkers).forEach(function(e) { if (!map.hasLayer(e.marker)) e.marker.addTo(map); });
+        countEl.textContent = '';
+        return;
+    }
+    var matches = [];
+    Object.values(apMarkers).forEach(function(e) {
+        var hay = [(e.ap.ssid || ''), (e.ap.bssid || ''), (e.ap.encryption || '')].join(' ').toLowerCase();
+        if (hay.indexOf(q) !== -1) {
+            if (!map.hasLayer(e.marker)) e.marker.addTo(map);
+            matches.push(e.marker);
+        } else {
+            e.marker.closePopup();
+            if (map.hasLayer(e.marker)) map.removeLayer(e.marker);
+        }
+    });
+    countEl.textContent = matches.length + ' match' + (matches.length !== 1 ? 'es' : '');
+    if (matches.length === 1) {
+        map.setView(matches[0].getLatLng(), Math.max(map.getZoom(), 16));
+        matches[0].openPopup();
+    } else if (matches.length > 1 && matches.length <= 30) {
+        map.fitBounds(L.featureGroup(matches).getBounds().pad(0.25));
+    }
+}
+
+document.getElementById('ap-search').addEventListener('input', function() {
+    searchAPs(this.value);
+});
+document.getElementById('ap-search-clear').addEventListener('click', function() {
+    document.getElementById('ap-search').value = '';
+    searchAPs('');
+});
 
 // ── GPS position ──────────────────────────────────────────────────────────────
 var gpsMarker = null;

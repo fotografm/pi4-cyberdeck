@@ -42,7 +42,7 @@ async def handle_root(request):
 async def handle_ws(request):
     global _session_active
 
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
 
     if _session_active:

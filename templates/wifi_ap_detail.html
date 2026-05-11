@@ -126,7 +126,7 @@ tr.client-panel-row td { padding:0; }
 var BSSID = {{ bssid | tojson }};
 var apMap = null, apMarker = null;
 
-var _TZ = 'Europe/Berlin';
+var _TZ = 'UTC';
 function fmtTs(ts) {
     if (!ts) return '—';
     try { return new Date(ts).toLocaleString('de-DE', {timeZone:_TZ,

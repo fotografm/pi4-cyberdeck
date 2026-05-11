@@ -67,6 +67,13 @@ sightings and ISM signals. A 3D satellite skymap shows satellite positions and
 signal strengths. All sightings stored with GPS coordinates are displayed on
 interactive Leaflet maps with tile caching for offline use.
 
+When a GPS fix is acquired the ISM monitor also uses the GPS UTC timestamp to
+synchronise the OS clock (via `sudo date -s`). This keeps the system clock
+accurate without NTP — the device is designed for offline use in the field.
+The sync runs at most every 5 minutes and only when the observed drift exceeds
+5 seconds. All timestamps stored in the databases and displayed in the UI are
+in UTC.
+
 ### WiFi history
 A separate passive sniffer records probe requests into a history database with
 device fingerprinting. The history section shows directed SSIDs (networks
@@ -168,6 +175,28 @@ these mandatory features.
 | 8097 | Notes | aiohttp |
 | 8098 | Services control | aiohttp |
 
+### Database file ownership
+
+Some services (`wifi_scanner`, `wifi_history_monitor`) run as `root` because
+they need to put the WiFi adapter in monitor mode. They create the SQLite
+database files, which therefore end up owned by `root`. The web services that
+read those databases run as `user` and need write access for SQLite WAL mode
+(even read-only queries require write access to the `-shm` file).
+
+All `User=user` services that open a database have an `ExecStartPre` step that
+fixes ownership before the Python process starts:
+
+```ini
+ExecStartPre=+-/bin/bash -c 'chown user:user /path/to/db* 2>/dev/null'
+```
+
+The `+` prefix tells systemd to run that specific step with full root
+privileges regardless of the service's `User=` setting. The `-` prefix
+suppresses failure (e.g. if the files do not exist yet on first boot). Without
+the `+` the chown runs as `user` and silently fails on root-owned files,
+causing Python to crash with `sqlite3.OperationalError: attempt to write a
+readonly database`.
+
 ### Database design
 
 Four SQLite databases store data independently:
@@ -248,6 +277,32 @@ because none of these elements contain the MAC address. Two probe requests
 from the same physical device with different randomised MACs produce identical
 hashes as long as the driver version has not changed. The fingerprint changes
 only when firmware is updated.
+
+### GPS time synchronisation
+
+The Pi 4 has no battery-backed hardware RTC. On boot the system time is
+restored from `fake-hwclock` (a file written to disk every 30 minutes and on
+clean shutdown), then corrected by GPS once a fix is acquired.
+
+NTP is intentionally disabled (`timedatectl set-ntp false`) because the device
+operates offline in the field. The ISM monitor (`ism_monitor.py`) takes
+responsibility for clock discipline:
+
+- Every time `gps_reader_async.py` delivers a position update with `fix=True`,
+  `_on_gps_update()` checks whether a sync is due (throttled to once per 5
+  minutes, skipped if drift < 5 s).
+- `_sync_time_from_gps()` parses the GPS UTC timestamp, computes drift against
+  `time.time()`, then calls `sudo date -s "@<unix_epoch>"`. Using the epoch
+  form avoids timezone and locale issues.
+- The sudoers drop-in `/etc/sudoers.d/raspi83-date` grants the `user` account
+  passwordless `sudo date -s` permission.
+
+The GPS reader (`gps_reader_async.py`) exposes a `gps_time` field populated
+from the `time` key of gpsd TPV messages. Only fields explicitly present in
+each TPV message update the reader's state — `msg.get("lat")` was replaced
+with `if "lat" in msg` guards throughout, because gpsd can emit mode=2 TPV
+messages that omit lat/lon during fix transitions, and the old code silently
+clobbered valid coordinates with `None`.
 
 ### ISM monitor watchdog
 
@@ -376,6 +431,17 @@ Open `http://10.42.0.1` in your browser.
 If accessing over Ethernet, use the Pi's Ethernet IP address instead.
 
 ---
+
+## Time and timezone
+
+All timestamps are stored and displayed in **UTC**. NTP is disabled; the GPS
+receiver is the sole time reference. The ISM monitor syncs the OS clock from
+GPS UTC every 5 minutes when a fix is held. On boot, `fake-hwclock` provides
+an approximate starting time until GPS corrects it (typically within 1–5
+minutes outdoors).
+
+All web pages that display timestamps show an **ALL TIMES UTC** label in the
+topbar.
 
 ## GPS notes
 
@@ -513,6 +579,27 @@ expecting the SSID to appear.
 
 - Check `iw dev` shows wlan1 in monitor mode
 - Check `sudo systemctl status ism-wifi-wifi-scan` for errors
+
+### Database files owned by root / `attempt to write a readonly database`
+
+After a fresh install or a manual database reset run as root, the SQLite files
+may be owned by `root:root`. The web services run as `user` and cannot write
+to them. The `ExecStartPre=+-chown` step in each service unit fixes this on
+every startup — if it is failing for some reason, fix manually:
+
+```
+sudo chown user:user ~/ism-wifi-monitor/db/*.db ~/ism-wifi-monitor/db/*.db-* 2>/dev/null
+sudo systemctl restart ism-wifi-ism ism-wifi-gps ism-wifi-wifi-web ism-wifi-history-web
+```
+
+### Terminal not connecting on mobile browsers
+
+The browser terminal uses a WebSocket to the PTY server on port 8096. Some
+mobile browsers (and browsers accessed over HTTPS) drop idle WebSocket
+connections aggressively. The PTY server sends a WebSocket ping every 30
+seconds (`WebSocketResponse(heartbeat=30)`) to keep the connection alive. If
+the terminal shows "connecting" and never connects, check that
+`ism-wifi-terminal.service` is active and that port 8096 is reachable.
 
 ### Web UI not loading
 

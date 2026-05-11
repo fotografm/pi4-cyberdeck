@@ -43,6 +43,22 @@ body { display:flex; flex-direction:column; height:100vh; overflow:hidden;
 #band-msg.ok  { color:var(--value-green); }
 #band-msg.err { color:var(--value-alert); }
 
+#filter-bar {
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    padding:8px 14px; border-bottom:1px solid var(--border-dim);
+    background:var(--panel); flex-shrink:0;
+}
+#filter-bar input {
+    background:var(--input-bg); border:1px solid var(--border);
+    color:var(--text); font-family:inherit; font-size:11px;
+    padding:4px 8px; border-radius:3px; width:260px;
+}
+#filter-bar button {
+    background:var(--btn-bg); border:1px solid var(--btn-border);
+    color:var(--btn-label); font-family:inherit; font-size:10px;
+    padding:4px 10px; cursor:pointer; border-radius:3px;
+}
+#filter-bar button:hover { background:var(--btn-bg-h); }
 #filterbar {
     display:flex; gap:8px; flex-wrap:wrap; padding:8px 14px;
     border-bottom:1px solid var(--border-dim);
@@ -120,6 +136,7 @@ tr:hover td { background:rgba(74,74,138,0.15); }
     <a href="#" onclick="window.location.href='http://'+window.location.hostname;return false;" class="back-btn">← Home</a>
     <h1>📡 ISM Live Feed</h1>
     <div id="freq-badge">RX: <span id="freq-val" style="color:var(--value-green);font-weight:bold;">—</span></div>
+    <span style="margin-left:auto;font-size:10px;color:var(--muted);letter-spacing:1px;">ALL TIMES UTC</span>
 </div>
 
 <div id="bandbar">
@@ -132,17 +149,20 @@ tr:hover td { background:rgba(74,74,138,0.15); }
     <span id="band-msg"></span>
 </div>
 
+<div id="filter-bar">
+    <input type="text" id="search-input" placeholder="Filter transmitter / device ID…">
+    <button onclick="applySearch()">Apply</button>
+    <button onclick="clearSearch()">Clear</button>
+    <span id="pkt-count">Showing <span id="shown-count">0</span> rows</span>
+</div>
 <div id="filterbar">
-    <span class="lbl">Filter:</span>
+    <span class="lbl">Category:</span>
     <button class="flt-btn active" data-cat="all">All</button>
-    <button class="flt-btn" data-cat="sensor">🌡 Weather / Sensors</button>
+    <button class="flt-btn" data-cat="sensor">🌡 Sensors</button>
     <button class="flt-btn" data-cat="tpms">🚗 TPMS</button>
-    <button class="flt-btn" data-cat="remote">📻 Remote Controls</button>
+    <button class="flt-btn" data-cat="remote">📻 Remote</button>
     <button class="flt-btn" data-cat="other">❓ Other</button>
-    <input type="text" id="search-input" placeholder="Search model / device ID…"
-        style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;padding:4px 8px;border-radius:3px;width:200px;">
-    <div id="pkt-count">Showing <span id="shown-count">0</span> rows</div>
-    <button class="clear-btn" onclick="clearDisplay()">🗑 Clear</button>
+    <button class="clear-btn" onclick="clearDisplay()">🗑 Clear display</button>
 </div>
 
 <div id="table-wrap">
@@ -174,10 +194,17 @@ let   searchStr    = '';
 let   allRows   = [];
 let   ws, wsRetry;
 
-searchEl.addEventListener('input', function() {
+function applySearch() {
     searchStr = searchEl.value.trim().toLowerCase();
     applyFilter();
-});
+}
+function clearSearch() {
+    searchEl.value = '';
+    searchStr = '';
+    applyFilter();
+}
+searchEl.addEventListener('input', applySearch);
+searchEl.addEventListener('keydown', function(e) { if (e.key === 'Enter') applySearch(); });
 
 document.querySelectorAll('.flt-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -242,7 +269,7 @@ function addRow(sig, flash) {
         try {
             var s = sig.ts.trim().replace(' ','T');
             if (!s.endsWith('Z') && !s.includes('+')) s += 'Z';
-            return new Date(s).toLocaleString('de-DE',{timeZone:'Europe/Berlin',
+            return new Date(s).toLocaleString('en-GB',{timeZone:'UTC',
                 year:'numeric',month:'2-digit',day:'2-digit',
                 hour:'2-digit',minute:'2-digit',second:'2-digit'});
         } catch(e) { return sig.ts; }

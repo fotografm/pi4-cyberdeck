@@ -19,15 +19,16 @@ log = logging.getLogger("gps")
 
 class GpsReader:
     def __init__(self) -> None:
-        self.lat:    float | None = None
-        self.lon:    float | None = None
-        self.alt:    float | None = None
-        self.speed:  float | None = None
-        self.mode:   int          = 0
-        self.sats_visible: int    = 0
-        self.sats_used:    int    = 0
-        self.hdop:   float | None = None
-        self._has_device: bool    = False
+        self.lat:      float | None = None
+        self.lon:      float | None = None
+        self.alt:      float | None = None
+        self.speed:    float | None = None
+        self.mode:     int          = 0
+        self.gps_time: str | None   = None
+        self.sats_visible: int      = 0
+        self.sats_used:    int      = 0
+        self.hdop:     float | None = None
+        self._has_device: bool      = False
         self._cb = None
 
     def set_callback(self, coro) -> None:
@@ -53,6 +54,7 @@ class GpsReader:
             "speed":        self.speed,
             "fix":          self.fix,
             "status":       self.status,
+            "gps_time":     self.gps_time,
             "sats_visible": self.sats_visible,
             "sats_used":    self.sats_used,
             "hdop":         self.hdop,
@@ -114,12 +116,16 @@ class GpsReader:
             self.mode = msg.get("mode", 0)
             if self.mode >= 2:
                 self._has_device = True
-                self.lat   = msg.get("lat")
-                self.lon   = msg.get("lon")
-                self.alt   = msg.get("alt")
-                self.speed = msg.get("speed")
+                # Only overwrite a field when the key is present in this message.
+                # gpsd can send mode=2 TPVs that omit lat/lon during fix transitions;
+                # using msg.get() would silently clobber valid coordinates with None.
+                if "lat"   in msg: self.lat      = msg["lat"]
+                if "lon"   in msg: self.lon      = msg["lon"]
+                if "alt"   in msg: self.alt      = msg["alt"]
+                if "speed" in msg: self.speed    = msg["speed"]
+                if "time"  in msg: self.gps_time = msg["time"]
             else:
-                self.lat = self.lon = None
+                self.lat = self.lon = self.gps_time = None
             asyncio.ensure_future(self._notify())
 
         elif cls == "SKY":

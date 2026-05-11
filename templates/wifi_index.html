@@ -65,6 +65,7 @@ tr { transition: background-color 1.4s ease; }
     <h1>&#128246; WiFi Channel Usage</h1>
     <a href="/aps" style="font-size:11px;color:var(--muted);">All APs &#8594;</a>
     <span id="tick">&#8212;</span>
+    <span style="margin-left:auto;font-size:10px;color:var(--muted);letter-spacing:1px;">ALL TIMES UTC</span>
 </div>
 <div class="content">
 
@@ -117,7 +118,7 @@ function rssiClass(rssi) {
 
 function fmtTs(ts) {
     if (!ts) return '\u2014';
-    try { return new Date(ts).toLocaleString('de-DE', {timeZone:'Europe/Berlin',
+    try { return new Date(ts).toLocaleString('en-GB', {timeZone:'UTC',
         year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
     catch(e) { return ts.replace('T',' ').slice(0,16); }
 }

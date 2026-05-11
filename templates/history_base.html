@@ -135,7 +135,7 @@ a.detail-link:hover { color: var(--value-white); text-decoration: underline; }
 {% block scripts %}{% endblock %}
 <script>
 /* Shared time helpers — all pages in this base use these */
-var _TZ = 'Europe/Berlin';
+var _TZ = 'UTC';
 function fmtTs(ts) {
     if (!ts) return '\u2014';
     try {

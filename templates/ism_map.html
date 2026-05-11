@@ -50,6 +50,26 @@ html, body { height:100%; overflow:hidden; padding:0; }
 
 #map { position:fixed; inset:48px 0 0 0; }
 
+#tx-search-wrap {
+    position:fixed; top:58px; right:10px; z-index:1001;
+    display:flex; align-items:center; gap:4px;
+    background:rgba(8,8,24,0.92); border:1px solid var(--border-dim);
+    border-radius:4px; padding:5px 8px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.5);
+}
+#tx-search {
+    background:transparent; border:none; outline:none;
+    color:var(--text); font-family:inherit; font-size:11px;
+    width:180px;
+}
+#tx-search::placeholder { color:var(--muted); }
+#tx-search-clear {
+    background:none; border:none; color:var(--muted); cursor:pointer;
+    font-size:12px; padding:0 2px; line-height:1;
+}
+#tx-search-clear:hover { color:var(--text); }
+#search-count { font-size:10px; color:var(--muted); white-space:nowrap; min-width:52px; }
+
 .leaflet-tile { image-rendering:auto; }
 .gps-marker-icon {
     width:16px; height:16px; border-radius:50%;
@@ -91,6 +111,13 @@ html, body { height:100%; overflow:hidden; padding:0; }
 
 <div id="map"></div>
 
+<div id="tx-search-wrap">
+    <span style="font-size:11px;color:var(--muted);margin-right:2px;">🔍</span>
+    <input type="text" id="tx-search" placeholder="Search transmitters…">
+    <button id="tx-search-clear" title="Clear search">✕</button>
+    <span id="search-count"></span>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 const map = L.map('map', {
@@ -113,7 +140,18 @@ const gpsIcon = L.divIcon({
 });
 let gpsMarker = null;
 let tracking  = false;
-let lastGpsPos = null;
+let lastGpsPos   = null;   // live GPS fix (from WebSocket)
+let lastKnownPos = null;   // last GPS-fixed position from DB (fallback)
+let _centredOnLiveGps = false;
+
+// Immediately fetch last known position from DB as initial map centre.
+// This replaces the Munich hardcoded default before the user sees it.
+fetch('/api/last_position').then(r => r.json()).then(pos => {
+    if (pos && pos.lat && pos.lon) {
+        lastKnownPos = pos;
+        if (!_centredOnLiveGps) map.setView([pos.lat, pos.lon], 13);
+    }
+}).catch(() => {});
 
 document.getElementById('track-btn').addEventListener('click', () => {
     tracking = !tracking;
@@ -121,7 +159,8 @@ document.getElementById('track-btn').addEventListener('click', () => {
     if (tracking) {
         btn.classList.add('active');
         btn.textContent = '📍 Track: ON';
-        if (lastGpsPos) map.setView([lastGpsPos.lat, lastGpsPos.lon]);
+        const pos = lastGpsPos || lastKnownPos;
+        if (pos) map.setView([pos.lat, pos.lon]);
     } else {
         btn.classList.remove('active');
         btn.textContent = '📍 Track: OFF';
@@ -129,10 +168,11 @@ document.getElementById('track-btn').addEventListener('click', () => {
 });
 
 document.getElementById('center-btn').addEventListener('click', () => {
-    if (lastGpsPos) map.setView([lastGpsPos.lat, lastGpsPos.lon]);
+    const pos = lastGpsPos || lastKnownPos;
+    if (pos) map.setView([pos.lat, pos.lon]);
 });
 
-const txMarkers = {};
+const txMarkers = {};  // key → { marker, tx }
 const catColour = { sensor:'#44aa44', tpms:'#ddaa44', remote:'#aa66cc', other:'#7788aa' };
 
 function makeTxIcon(cat) {
@@ -169,17 +209,54 @@ function upsertTxMarker(tx) {
     if (!tx.last_lat || !tx.last_lon || !tx.last_gps_fix) return;
     const key = `${tx.model}|${tx.device_id}`;
     if (txMarkers[key]) {
-        txMarkers[key].setLatLng([tx.last_lat, tx.last_lon]);
-        txMarkers[key].setPopupContent(popupContent(tx));
+        txMarkers[key].marker.setLatLng([tx.last_lat, tx.last_lon]);
+        txMarkers[key].marker.setPopupContent(popupContent(tx));
+        txMarkers[key].tx = tx;
     } else {
         const cat = tx.category || 'other';
         const m = L.marker([tx.last_lat, tx.last_lon], { icon: makeTxIcon(cat) })
             .bindPopup(popupContent(tx))
             .addTo(map);
-        txMarkers[key] = m;
+        txMarkers[key] = { marker: m, tx };
     }
     document.getElementById('tx-count').textContent = Object.keys(txMarkers).length;
 }
+
+function searchTransmitters(query) {
+    const q = query.trim().toLowerCase();
+    const countEl = document.getElementById('search-count');
+    if (!q) {
+        Object.values(txMarkers).forEach(({ marker }) => { if (!map.hasLayer(marker)) marker.addTo(map); });
+        countEl.textContent = '';
+        return;
+    }
+    const matches = [];
+    Object.values(txMarkers).forEach(({ marker, tx }) => {
+        const hay = ((tx.model || '') + ' ' + (tx.device_id || '')).toLowerCase();
+        if (hay.includes(q)) {
+            if (!map.hasLayer(marker)) marker.addTo(map);
+            matches.push(marker);
+        } else {
+            marker.closePopup();
+            if (map.hasLayer(marker)) map.removeLayer(marker);
+        }
+    });
+    countEl.textContent = matches.length + ' match' + (matches.length !== 1 ? 'es' : '');
+    if (matches.length === 1) {
+        map.setView(matches[0].getLatLng(), Math.max(map.getZoom(), 15));
+        matches[0].openPopup();
+    } else if (matches.length > 1 && matches.length <= 30) {
+        map.fitBounds(L.featureGroup(matches).getBounds().pad(0.25));
+    }
+}
+
+document.getElementById('tx-search').addEventListener('input', function () {
+    searchTransmitters(this.value);
+});
+document.getElementById('tx-search-clear').addEventListener('click', function () {
+    document.getElementById('tx-search').value = '';
+    searchTransmitters('');
+});
 
 fetch('/api/transmitters').then(r => r.json()).then(rows => {
     rows.forEach(upsertTxMarker);
@@ -202,6 +279,10 @@ function connect() {
 function handleGps(d) {
     if (d.status === 'FIX' && d.lat && d.lon) {
         lastGpsPos = d;
+        if (!_centredOnLiveGps) {
+            map.setView([d.lat, d.lon], map.getZoom());
+            _centredOnLiveGps = true;
+        }
         if (gpsMarker) { gpsMarker.setLatLng([d.lat, d.lon]); }
         else { gpsMarker = L.marker([d.lat, d.lon], { icon: gpsIcon })
                     .bindTooltip('Your position', { permanent: false }).addTo(map); }

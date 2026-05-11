@@ -92,7 +92,7 @@ var titleInput=document.getElementById('note-title-input');
 var contentInput=document.getElementById('note-content-input');
 var deleteBtn=document.getElementById('delete-btn');
 function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function fmtTime(ts){var d=new Date(ts*1000);try{return d.toLocaleString('de-DE',{timeZone:'Europe/Berlin',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return d.toDateString();}}
+function fmtTime(ts){var d=new Date(ts*1000);try{return d.toLocaleString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return d.toDateString();}}
 function preview(c){return(c||'').replace(/\n/g,' ').trim().slice(0,55);}
 function hl(text,q){var e=escHtml(text||'');if(!q)return e;var s=escHtml(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return e.replace(new RegExp('('+s+')','gi'),'<mark>$1</mark>');}
 function renderList(){

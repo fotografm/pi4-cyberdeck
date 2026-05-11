@@ -16,6 +16,7 @@ import logging
 import os
 import socket
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
@@ -298,6 +299,34 @@ async def _fetch_tile(session: aiohttp.ClientSession, z: int, x: int, y: int) ->
     return None
 
 
+_TIME_SYNC_INTERVAL = 300.0  # minimum seconds between GPS time syncs
+_TIME_SYNC_MIN_DRIFT = 5.0   # only sync if system clock differs by this many seconds
+
+
+async def _sync_time_from_gps(iso_time: str) -> None:
+    """Set the OS clock from a GPS UTC timestamp (ISO 8601, e.g. '2024-05-11T14:32:45.000Z')."""
+    try:
+        gps_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        gps_ts = gps_dt.timestamp()
+        drift = abs(time.time() - gps_ts)
+        if drift < _TIME_SYNC_MIN_DRIFT:
+            return
+        # Use Unix epoch form to sidestep timezone/locale issues
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "date", "-s", f"@{int(gps_ts)}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode == 0:
+            log.info("System time synced from GPS: %s (drift was %.1fs)",
+                     gps_dt.strftime("%Y-%m-%d %H:%M:%S UTC"), drift)
+        else:
+            log.warning("GPS time sync failed (date -s returned %d)", proc.returncode)
+    except Exception as exc:
+        log.warning("GPS time sync error: %s", exc)
+
+
 # ── Application ───────────────────────────────────────────────────────────────
 
 class App:
@@ -307,6 +336,7 @@ class App:
         self.ws_clients: set[web.WebSocketResponse] = set()
         self._gps_pos  = self.gps.position()
         self._tile_session: aiohttp.ClientSession | None = None
+        self._last_time_sync: float = 0.0
 
     # ── Signal processing ─────────────────────────────────────────────────────
 
@@ -366,8 +396,20 @@ class App:
     # ── GPS callback ──────────────────────────────────────────────────────────
 
     async def _on_gps_update(self, pos: dict) -> None:
+        prev_fix = self._gps_pos.get("fix")
         self._gps_pos = pos
         await self._broadcast({"type": "gps", "data": pos})
+        gps_time = pos.get("gps_time")
+        if gps_time and pos.get("fix"):
+            now = time.time()
+            if now - self._last_time_sync >= _TIME_SYNC_INTERVAL:
+                self._last_time_sync = now
+                asyncio.ensure_future(_sync_time_from_gps(gps_time))
+        if pos.get("fix") and not prev_fix:
+            loop = asyncio.get_event_loop()
+            asyncio.ensure_future(
+                loop.run_in_executor(None, db.repair_transmitter_positions)
+            )
 
     # ── WebSocket broadcast ───────────────────────────────────────────────────
 
@@ -438,6 +480,13 @@ class App:
             "tile_cache": stats,
             "sysinfo":    sysinfo,
         })
+
+    async def api_last_position(self, req: web.Request) -> web.Response:
+        loop = asyncio.get_event_loop()
+        pos = await loop.run_in_executor(None, db.get_last_gps_position)
+        if pos is None:
+            return web.json_response(None)
+        return web.json_response(pos)
 
     async def api_signals(self, req: web.Request) -> web.Response:
         limit = int(req.rel_url.query.get("limit", 500))
@@ -587,6 +636,7 @@ def build_app() -> web.Application:
     wa.router.add_get("/ws",                  app_obj.handle_ws)
     wa.router.add_get("/tiles/{z}/{x}/{y}",   app_obj.handle_tile)
     wa.router.add_get("/api/status",          app_obj.api_status)
+    wa.router.add_get("/api/last_position",   app_obj.api_last_position)
     wa.router.add_get("/api/signals",         app_obj.api_signals)
     wa.router.add_get("/api/transmitters",    app_obj.api_transmitters)
     wa.router.add_post("/api/band",           app_obj.api_set_band)

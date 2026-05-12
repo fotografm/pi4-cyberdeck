@@ -252,8 +252,9 @@ body { display:flex; flex-direction:column; align-items:center;
 </div>
 
 <script>
-const API_ISM  = 'http://' + location.hostname + ':8092';
-const API_WIFI = 'http://' + location.hostname + ':8091';
+const API_ISM      = 'http://' + location.hostname + ':8092';
+const API_WIFI     = 'http://' + location.hostname + ':8091';
+const API_SERVICES = 'http://' + location.hostname + ':8098';
 const WS_URL   = 'ws://'  + location.hostname + ':8092/ws';
 let ws, wsRetry;
 
@@ -358,7 +359,7 @@ function closeModal() {
 }
 document.getElementById('modal-ok').onclick = function() {
     if (!_pendingAction) return;
-    fetch(API_ISM + '/api/' + _pendingAction, { method: 'POST' }).catch(function() {});
+    fetch(API_SERVICES + '/api/' + _pendingAction, { method: 'POST' }).catch(function() {});
     closeModal();
 };
 

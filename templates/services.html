@@ -86,6 +86,55 @@ body { background:var(--bg);color:var(--text);font-family:monospace;font-size:13
 .btn-confirm-no  { padding:3px 10px;border-radius:3px;border:1px solid #444466;background:#0d0d20;color:#aaaadd;font-family:monospace;font-size:11px;cursor:pointer; }
 .btn-confirm-no:hover  { background:#1a1a30; }
 .db-msg { font-size:10px;min-width:80px; }
+
+/* ── Power buttons ────────────────────────────────────────── */
+.power-row { display:flex;gap:12px;justify-content:center;padding:8px 0; }
+.btn-reboot {
+    padding:8px 28px;border-radius:3px;font-family:monospace;font-size:12px;
+    letter-spacing:2px;cursor:pointer;border:1px solid #664400;
+    background:#1a1000;color:#ddaa44;
+    transition:background 0.15s,border-color 0.15s;
+}
+.btn-reboot:hover { background:#2a1800;border-color:#eeaa22;color:#ffcc66; }
+.btn-shutdown {
+    padding:8px 28px;border-radius:3px;font-family:monospace;font-size:12px;
+    letter-spacing:2px;cursor:pointer;border:1px solid #882222;
+    background:#1a0808;color:#ff5555;
+    transition:background 0.15s,border-color 0.15s;
+}
+.btn-shutdown:hover { background:#2a0f0f;border-color:#ff3333;color:#ff8888; }
+.power-modal-overlay {
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;
+    align-items:center;justify-content:center;
+}
+.power-modal-overlay.visible { display:flex; }
+.power-modal {
+    background:var(--panel);border:1px solid var(--border-dim);border-radius:6px;
+    padding:24px 28px;max-width:320px;width:90%;text-align:center;
+}
+.power-modal-title { font-size:13px;color:var(--heading);letter-spacing:2px;margin-bottom:10px; }
+.power-modal-msg   { font-size:11px;color:var(--muted);margin-bottom:20px;line-height:1.6; }
+.power-modal-btns  { display:flex;gap:10px;justify-content:center; }
+.btn-pm-cancel { padding:5px 18px;border-radius:3px;border:1px solid #444466;background:#0d0d20;color:#aaaadd;font-family:monospace;font-size:11px;cursor:pointer; }
+.btn-pm-cancel:hover { background:#1a1a30; }
+.btn-pm-confirm { padding:5px 18px;border-radius:3px;border:1px solid #882222;background:#2a0808;color:#ff8888;font-family:monospace;font-size:11px;cursor:pointer; }
+.btn-pm-confirm:hover { background:#3a0f0f; }
+
+/* ── RTL-SDR mutex group ──────────────────────────────────── */
+.rtlsdr-group {
+    background:var(--panel);border:1px solid var(--border-dim);border-radius:4px;
+    padding:10px 12px;margin-bottom:6px;
+}
+.rtlsdr-note {
+    font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:8px;
+    text-transform:uppercase;
+}
+.rtlsdr-rows { display:flex;flex-direction:column;gap:6px; }
+.rtlsdr-row {
+    display:flex;align-items:center;gap:10px;
+    padding:6px 0;border-top:1px solid var(--border-dim);
+}
+.rtlsdr-row:first-child { border-top:none;padding-top:0; }
 </style>
 </head>
 <body>
@@ -93,6 +142,13 @@ body { background:var(--bg);color:var(--text);font-family:monospace;font-size:13
     <a href="#" onclick="window.location.href='http://'+window.location.hostname;return false;" class="back-btn">&#8592; Home</a>
     <h1>&#9881; Services</h1>
     <span id="tick"></span>
+</div>
+
+<div class="section">
+    <div class="section-title">RTL-SDR Radio &mdash; mutually exclusive</div>
+    <div id="rtlsdr-group-container">
+        <div style="color:var(--dim);font-size:11px;padding:12px">Loading&hellip;</div>
+    </div>
 </div>
 
 <div class="section">
@@ -106,6 +162,25 @@ body { background:var(--bg);color:var(--text);font-family:monospace;font-size:13
     <div class="section-title">Database Management</div>
     <div id="db-list">
         <div style="color:var(--dim);font-size:11px;padding:12px">Loading&hellip;</div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">System Power</div>
+    <div class="power-row">
+        <button class="btn-reboot"   onclick="powerAction('reboot')">&#9100; Reboot</button>
+        <button class="btn-shutdown" onclick="powerAction('shutdown')">&#9209; Shutdown</button>
+    </div>
+</div>
+
+<div class="power-modal-overlay" id="power-modal">
+    <div class="power-modal">
+        <div class="power-modal-title" id="power-modal-title"></div>
+        <div class="power-modal-msg"   id="power-modal-msg"></div>
+        <div class="power-modal-btns">
+            <button class="btn-pm-cancel"  onclick="powerCancel()">Cancel</button>
+            <button class="btn-pm-confirm" id="power-modal-ok" onclick="powerConfirm()">Confirm</button>
+        </div>
     </div>
 </div>
 
@@ -131,29 +206,66 @@ function textClass(status) {
     return 'status-text status-unknown';
 }
 
+function svcRowHTML(svc) {
+    var startDis = !svc.controllable || svc.status === 'active' ? 'disabled' : '';
+    var stopDis  = !svc.controllable || svc.status !== 'active' ? 'disabled' : '';
+    return '<span class="svc-label">' + svc.label + '</span>' +
+        '<span class="svc-port">' + (svc.port ? 'port ' + svc.port : '&mdash;') + '</span>' +
+        (svc.controllable
+            ? '<button class="btn-start" ' + startDis + ' onclick="svcAction(\'' + svc.name + '\',\'start\')">&#9654; Start</button>' +
+              '<button class="btn-stop"  ' + stopDis  + ' onclick="svcAction(\'' + svc.name + '\',\'stop\')">&#9646;&#9646; Stop</button>'
+            : '<span style="min-width:148px;font-size:10px;color:var(--dim);text-align:center">protected</span>'
+        ) +
+        '<div class="svc-status">' +
+            '<div class="' + dotClass(svc.status) + '"></div>' +
+            '<span class="' + textClass(svc.status) + '">' + svc.status + '</span>' +
+        '</div>';
+}
+
+var _allSvcs = [];
+
 function renderServices(svcs) {
+    _allSvcs = svcs;
+
+    // Split into mutex groups and regular
+    var mutexGroups = {};
+    var regular = [];
+    svcs.forEach(function(svc) {
+        if (svc.mutex_group) {
+            if (!mutexGroups[svc.mutex_group]) mutexGroups[svc.mutex_group] = [];
+            mutexGroups[svc.mutex_group].push(svc);
+        } else {
+            regular.push(svc);
+        }
+    });
+
+    // Render RTL-SDR mutex group
+    var container = document.getElementById('rtlsdr-group-container');
+    container.innerHTML = '';
+    if (mutexGroups['rtlsdr']) {
+        var box = document.createElement('div');
+        box.className = 'rtlsdr-group';
+        box.innerHTML = '<div class="rtlsdr-note">Only one service can use the RTL-SDR dongle at a time &mdash; starting one stops the other</div>' +
+            '<div class="rtlsdr-rows" id="rtlsdr-rows"></div>';
+        container.appendChild(box);
+        var rows = document.getElementById('rtlsdr-rows');
+        mutexGroups['rtlsdr'].forEach(function(svc) {
+            var row = document.createElement('div');
+            row.className = 'rtlsdr-row';
+            row.id = 'svc-row-' + svc.name;
+            row.innerHTML = svcRowHTML(svc);
+            rows.appendChild(row);
+        });
+    }
+
+    // Render regular services
     var list = document.getElementById('svc-list');
     list.innerHTML = '';
-    svcs.forEach(function(svc) {
+    regular.forEach(function(svc) {
         var row = document.createElement('div');
         row.className = 'svc-row';
         row.id = 'svc-row-' + svc.name;
-
-        var startDis = !svc.controllable || svc.status === 'active'   ? 'disabled' : '';
-        var stopDis  = !svc.controllable || svc.status !== 'active'   ? 'disabled' : '';
-
-        row.innerHTML =
-            '<span class="svc-label">' + svc.label + '</span>' +
-            '<span class="svc-port">' + (svc.port ? 'port ' + svc.port : '&mdash;') + '</span>' +
-            (svc.controllable
-                ? '<button class="btn-start" ' + startDis + ' onclick="svcAction(\'' + svc.name + '\',\'start\')">&#9654; Start</button>' +
-                  '<button class="btn-stop"  ' + stopDis  + ' onclick="svcAction(\'' + svc.name + '\',\'stop\')">&#9646;&#9646; Stop</button>'
-                : '<span style="min-width:148px;font-size:10px;color:var(--dim);text-align:center">protected</span>'
-            ) +
-            '<div class="svc-status">' +
-                '<div class="' + dotClass(svc.status) + '"></div>' +
-                '<span class="' + textClass(svc.status) + '">' + svc.status + '</span>' +
-            '</div>';
+        row.innerHTML = svcRowHTML(svc);
         list.appendChild(row);
     });
 }
@@ -169,9 +281,24 @@ function updateServiceRow(name, status) {
     if (text) { text.className = textClass(status); text.textContent = status; }
     if (startBtn) startBtn.disabled = (status === 'active');
     if (stopBtn)  stopBtn.disabled  = (status !== 'active');
+    // Update cached status
+    var cached = _allSvcs.find(function(s){ return s.name === name; });
+    if (cached) cached.status = status;
 }
 
 function svcAction(name, action) {
+    if (action === 'start') {
+        // Check if another service in the same mutex group is active
+        var me = _allSvcs.find(function(s){ return s.name === name; });
+        if (me && me.mutex_group) {
+            var conflict = _allSvcs.find(function(s){
+                return s.name !== name && s.mutex_group === me.mutex_group && s.status === 'active';
+            });
+            if (conflict) {
+                if (!confirm('Starting ' + me.label + ' will stop ' + conflict.label + '. Continue?')) return;
+            }
+        }
+    }
     fetch(BASE + '/api/service/' + name + '/' + action, {method:'POST'})
         .then(function(r){ return r.json(); })
         .then(function(d){
@@ -286,6 +413,29 @@ setInterval(function(){
 
 loadServices(true);
 loadDbs();
+
+/* ── Power ───────────────────────────────────────────────────── */
+var _pendingPower = null;
+function powerAction(action) {
+    _pendingPower = action;
+    var isShutdown = action === 'shutdown';
+    document.getElementById('power-modal-title').textContent = isShutdown ? '⮌ Shutdown' : '↺ Reboot';
+    document.getElementById('power-modal-msg').textContent   = isShutdown
+        ? 'This will power off raspi83. Wait 10 seconds before removing power.'
+        : 'This will reboot raspi83.';
+    document.getElementById('power-modal-ok').textContent    = isShutdown ? 'Shut down' : 'Reboot';
+    document.getElementById('power-modal').classList.add('visible');
+}
+function powerCancel() {
+    _pendingPower = null;
+    document.getElementById('power-modal').classList.remove('visible');
+}
+function powerConfirm() {
+    if (!_pendingPower) return;
+    var action = _pendingPower;
+    powerCancel();
+    fetch(BASE + '/api/' + action, {method:'POST'}).catch(function(){});
+}
 </script>
 </body>
 </html>

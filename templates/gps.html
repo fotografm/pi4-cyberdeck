@@ -46,9 +46,15 @@
   }
   .back-btn:hover { background: var(--border); color: var(--accent); }
 
+  /* ── Header GPS time ── */
+  #h-gpstime {
+    flex: 1; text-align: center;
+    font-family: monospace; font-size: 12px;
+    color: var(--green); letter-spacing: 1px; white-space: nowrap;
+  }
+
   /* ── Shutdown button ── */
   #shutdown-btn {
-    margin-left: auto;
     background: #7f1d1d; color: #fca5a5;
     border: 1px solid #991b1b; padding: 4px 12px;
     border-radius: 4px; cursor: pointer; font-size: 12px;
@@ -179,6 +185,7 @@
   <div class="hstat">Mode: <span id="h-mode">—</span></div>
   <div class="hstat">Sats: <span id="h-sats">—</span></div>
   <div id="tick">↻ 2s</div>
+  <div id="h-gpstime" title="Raw GPS time — only updates when satellites received">—</div>
   <button id="shutdown-btn" onclick="openModal()">⏻</button>
 </header>
 
@@ -441,6 +448,8 @@ function renderPositionRows(d) {
   renderDOP('p-hdop', d.sky.hdop);
   renderDOP('p-vdop', d.sky.vdop);
   renderDOP('p-pdop', d.sky.pdop);
+  const t = p.gps_time;
+  setText('h-gpstime', t ? t.replace('T', '  ').replace(/\.\d+Z$/, ' Z').replace('Z', ' UTC') : '—');
 }
 
 function renderDOP(id, val) {

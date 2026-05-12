@@ -153,8 +153,8 @@ html, body { height: 100%; margin: 0; padding: 0; background: #080818; }
 <script>
 // ── map init ──────────────────────────────────────────────────────────────────
 var map = L.map('map', {
-    center: [48.137, 11.575],
-    zoom: 15,
+    center: [51.5, -0.1],
+    zoom: 6,
     zoomControl: true,
 });
 
@@ -292,16 +292,18 @@ function toggleTrack() {
 
 function centreOnGps() {
     if (gpsMarker) {
-        map.setView(gpsMarker.getLatLng(), map.getZoom());
+        map.setView(gpsMarker.getLatLng(), Math.max(map.getZoom(), 16));
+    } else {
+        updateGPS(true);
     }
 }
 
-function updateGPS() {
-    fetch('http://' + location.hostname + ':8092/api/status')
+function updateGPS(forceView) {
+    fetch('http://' + location.hostname + ':8093/api/gps')
         .then(function(r){ return r.json(); })
         .then(function(d){
-            var lat = d.gps && d.gps.lat;
-            var lon = d.gps && d.gps.lon;
+            var lat = d.position && d.fix && d.position.lat;
+            var lon = d.position && d.fix && d.position.lon;
             if (!lat || !lon) return;
 
             var latlng = [lat, lon];
@@ -313,6 +315,7 @@ function updateGPS() {
                 map.setView(latlng, 16);
             } else {
                 gpsMarker.setLatLng(latlng);
+                if (forceView) map.setView(latlng, Math.max(map.getZoom(), 16));
             }
 
             if (tracking) map.setView(latlng, map.getZoom());

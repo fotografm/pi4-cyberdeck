@@ -45,7 +45,7 @@ _stop = threading.Event()
 
 _position: dict = {
     'lat': None, 'lon': None, 'alt': None, 'speed': None,
-    'fix': False, 'mode': 0,
+    'fix': False, 'mode': 0, 'gps_time': None,
 }
 _sky: dict = {
     'hdop': None, 'vdop': None, 'pdop': None, 'satellites': [],
@@ -139,12 +139,13 @@ def _gps_thread() -> None:
                         mode = int(msg.get('mode', 0))
                         with _lock:
                             _position.update({
-                                'lat':   msg.get('lat'),
-                                'lon':   msg.get('lon'),
-                                'alt':   msg.get('alt'),
-                                'speed': msg.get('speed'),
-                                'fix':   mode >= 2,
-                                'mode':  mode,
+                                'lat':      msg.get('lat'),
+                                'lon':      msg.get('lon'),
+                                'alt':      msg.get('alt'),
+                                'speed':    msg.get('speed'),
+                                'fix':      mode >= 2,
+                                'mode':     mode,
+                                'gps_time': msg.get('time') if mode >= 2 else None,
                             })
                     elif cls == 'SKY':
                         sats_raw = msg.get('satellites', []) or []
@@ -227,7 +228,8 @@ app = Flask(__name__, template_folder=os.path.join(APP_DIR, 'templates'))
 
 @app.route('/')
 def index():
-    return render_template('gps.html')
+    tmpl = Path(app.template_folder) / 'gps.html'
+    return app.response_class(tmpl.read_text(), mimetype='text/html')
 
 
 @app.route('/api/gps')

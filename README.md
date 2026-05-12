@@ -67,6 +67,12 @@ sightings and ISM signals. A 3D satellite skymap shows satellite positions and
 signal strengths. All sightings stored with GPS coordinates are displayed on
 interactive Leaflet maps with tile caching for offline use.
 
+The GPS dashboard (port 8093) header displays the raw satellite UTC timestamp
+as received from gpsd — it only updates when satellite data is actually being
+received. It is intentionally not a JS clock that continues running when the
+receiver is offline; it acts as a live confirmation that the GPS chain is
+working end-to-end.
+
 When a GPS fix is acquired the ISM monitor also uses the GPS UTC timestamp to
 synchronise the OS clock (via `sudo date -s`). This keeps the system clock
 accurate without NTP — the device is designed for offline use in the field.
@@ -91,7 +97,7 @@ been in range and which networks they have previously connected to.
 | Hotspot | Onboard BCM43455 (wlan0) |
 | WiFi monitor | MT7612U USB dongle (wlan1) |
 | ISM radio / SDR | RTL-SDR Blog V3 dongle |
-| GPS | Geekstory G72 u-blox M8130 |
+| GPS | u-blox 8 receiver with external antenna (mouse-style) |
 | Ethernet | Optional (for setup and internet passthrough) |
 
 ### MT7612U WiFi adapter
@@ -111,15 +117,28 @@ Services page to stop one before starting the other.
 
 ### GPS receiver
 
-The Geekstory G72 uses a u-blox UBX-M8130 chip with 72 channels supporting
-GPS, GLONASS, BeiDou and QZSS. It communicates at 9600 baud over USB CDC-ACM
-(`/dev/ttyACM0`). The device has no backup battery — it does a full cold start
-whenever power is removed, which takes 30-60 seconds to acquire a fix in good
-conditions.
+A u-blox 8 receiver communicates at 9600 baud over USB CDC-ACM (`/dev/ttyACM0`).
+The device has no backup battery — it does a full cold start whenever power is
+removed, which takes 30-60 seconds to acquire a fix in good conditions.
 
-**Important:** The ceramic patch antenna on the G72 must face skyward. The
-flat side of the dongle must point up. Installing it upside down results in
-severely degraded GPS performance with weak or no satellite reception.
+**Antenna matters more than the chip.** The original receiver was a compact USB
+stick (Geekstory G72) with an internal ceramic patch antenna. After several
+months the antenna degraded — outdoors it would see only 4–6 satellites at
+20–28 dBHz with no lock, while an identical chip in a mouse-style receiver with
+an external antenna immediately acquired 14+ satellites at 30–40 dBHz from the
+same location. The chip was fine; the internal antenna had failed.
+
+A **mouse-style receiver with an external stub or patch antenna** on a short
+cable is far more reliable than a compact USB stick form factor. The larger
+external antenna has more robust construction and can be positioned for a clear
+sky view independently of the USB port orientation.
+
+**USB bus placement:** Running the RTL-SDR dongle on the same USB hub as the
+GPS receiver causes RF interference that visibly reduces satellite count (from
+~11 to ~5 visible satellites in testing). Place the GPS receiver on a separate
+USB bus from the RTL-SDR — on the Pi 4B this means using the USB 3.0 port
+(Bus 2) for the GPS and the USB 2.0 ports (Bus 1) for the RTL-SDR and WiFi
+adapter.
 
 ---
 
@@ -445,18 +464,28 @@ topbar.
 
 ## GPS notes
 
-The G72 receiver has no backup battery. Every time USB power is removed it
+The u-blox 8 receiver has no backup battery. Every time USB power is removed it
 loses its almanac and ephemeris data and must do a full cold start. Cold start
 time is typically 30-60 seconds outdoors with clear sky view. After a cold
 start it may take 5-15 minutes for the full almanac to download, during which
 satellite count will be low.
 
-If the receiver is not getting a fix:
+If the receiver is not getting a fix or signal strengths are very weak (below
+~28 dBHz):
 
-1. **Check antenna orientation** — the flat ceramic patch must face skyward
-2. **Check gpsd config** — `/etc/default/gpsd` must have `DEVICES="/dev/ttyACM0"`
-3. **Force a cold start** — `sudo ubxtool -p COLDSTART`
-4. **Check raw output** — `sudo systemctl stop gpsd && sudo timeout 10 cat /dev/ttyACM0`
+1. **Check the antenna first** — this is the most common failure mode. A compact
+   USB stick receiver with an internal ceramic patch antenna can degrade silently:
+   the chip appears functional (shows satellites, outputs NMEA) but signals are
+   too weak to fix. Test by swapping to a mouse-style receiver with an external
+   antenna from the same location — if it immediately acquires a strong fix, the
+   original antenna has failed. The chip is almost never the problem.
+2. **Check for USB interference** — the RTL-SDR dongle emits wideband RF noise
+   that interferes with GPS reception when both are on the same USB hub. Stop
+   `ism-wifi-ism` from the Services page and recheck satellite count. Place the
+   GPS receiver on a separate USB bus (USB 3.0 port on Pi 4B).
+3. **Check gpsd config** — `/etc/default/gpsd` must have `DEVICES="/dev/ttyACM0"`
+4. **Force a cold start** — `sudo ubxtool -p COLDSTART`
+5. **Check raw output** — `sudo systemctl stop gpsd && sudo timeout 10 cat /dev/ttyACM0`
    should show NMEA sentences. `ANTSTATUS=OK` confirms the antenna is connected.
 
 The GPS dashboard is at `http://<ip>:8093`. The 3D skymap is at port 8094.
@@ -497,11 +526,17 @@ The Services page at `http://<ip>:8098` provides:
 
 - **Real-time service status** — live systemd status with green/red indicators
   polling every 5 seconds. A crashed service shows red immediately.
-- **Start/Stop buttons** — start or stop individual services without SSH
+- **Start/Stop buttons** — enable or disable individual services using
+  `systemctl enable --now` / `disable --now`, so the chosen state persists
+  across reboots. Stopping a service before reboot keeps it stopped; starting
+  one keeps it running after the next boot.
 - **Database management** — shows current row counts and file sizes for all
   four databases. Each database has a Clear button with a confirmation step.
   Clearing a database reinitialises it with empty tables immediately so
   services continue without errors.
+- **Shutdown / Reboot buttons** — at the bottom of the page, with a
+  confirmation dialog. Calls `systemctl poweroff` or `systemctl reboot` via
+  the root-privileged aiohttp server.
 
 ---
 

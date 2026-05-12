@@ -1,5 +1,5 @@
 """
-services_server.py  —  raspi81 ism-wifi-monitor
+services_server.py  —  raspi83 ism-wifi-monitor
 Service control panel backend on port 8098.
 Runs as root so it can call systemctl start/stop.
 
@@ -10,6 +10,8 @@ Endpoints:
   POST /api/service/<name>/stop   — stop a service
   GET  /api/db                    — info (count, size) for each DB
   POST /api/db/<name>/clear       — delete and recreate a DB
+  POST /api/reboot                — reboot the Pi
+  POST /api/shutdown              — shut down the Pi
 """
 
 import asyncio
@@ -38,18 +40,19 @@ APP_DIR = Path('/home/user/ism-wifi-monitor')
 # ── Service definitions ───────────────────────────────────────────────────────
 
 SERVICES = [
-    {'name': 'ism-wifi-landing',         'label': 'Landing Page',          'port': 80},
-    {'name': 'ism-wifi-wifi-web',        'label': 'WiFi Web',              'port': 8091},
-    {'name': 'ism-wifi-ism',             'label': 'ISM Monitor',           'port': 8092},
-    {'name': 'ism-wifi-gps',             'label': 'GPS Dashboard',         'port': 8093},
-    {'name': 'ism-wifi-skymap3d',        'label': '3D Skymap',             'port': 8094},
-    {'name': 'ism-wifi-history-web',     'label': 'WiFi History Web',      'port': 8095},
-    {'name': 'ism-wifi-terminal',        'label': 'Terminal Server',       'port': 8096},
-    {'name': 'ism-wifi-notes',           'label': 'Notes Server',          'port': 8097},
-    {'name': 'ism-wifi-services',        'label': 'Services Control',      'port': 8098},
-    {'name': 'ism-wifi-wifi-scan',       'label': 'WiFi Scanner (root)',   'port': None},
-    {'name': 'ism-wifi-history-monitor', 'label': 'History Monitor (root)','port': None},
-    {'name': 'rfkill-unblock',           'label': 'RF Kill Unblock',       'port': None},
+    {'name': 'ism-wifi-landing',         'label': 'Landing Page',          'port': 80,   'mutex_group': None},
+    {'name': 'ism-wifi-wifi-web',        'label': 'WiFi Web',              'port': 8091, 'mutex_group': None},
+    {'name': 'ism-wifi-ism',             'label': 'ISM Monitor',           'port': 8092, 'mutex_group': 'rtlsdr'},
+    {'name': 'ferrosdr',                 'label': 'FerroSDR Waterfall',    'port': 8080, 'mutex_group': 'rtlsdr'},
+    {'name': 'ism-wifi-gps',             'label': 'GPS Dashboard',         'port': 8093, 'mutex_group': None},
+    {'name': 'ism-wifi-skymap3d',        'label': '3D Skymap',             'port': 8094, 'mutex_group': None},
+    {'name': 'ism-wifi-history-web',     'label': 'WiFi History Web',      'port': 8095, 'mutex_group': None},
+    {'name': 'ism-wifi-terminal',        'label': 'Terminal Server',       'port': 8096, 'mutex_group': None},
+    {'name': 'ism-wifi-notes',           'label': 'Notes Server',          'port': 8097, 'mutex_group': None},
+    {'name': 'ism-wifi-services',        'label': 'Services Control',      'port': 8098, 'mutex_group': None},
+    {'name': 'ism-wifi-wifi-scan',       'label': 'WiFi Scanner (root)',   'port': None, 'mutex_group': None},
+    {'name': 'ism-wifi-history-monitor', 'label': 'History Monitor (root)','port': None, 'mutex_group': None},
+    {'name': 'rfkill-unblock',           'label': 'RF Kill Unblock',       'port': None, 'mutex_group': None},
 ]
 
 # Only allow start/stop of these — protect rfkill and self
@@ -213,6 +216,7 @@ async def api_services(request):
             'port':            svc['port'],
             'status':          status,
             'controllable':    svc['name'] in ALLOWED_CONTROL,
+            'mutex_group':     svc.get('mutex_group'),
         })
     return json_resp(result)
 
@@ -222,10 +226,10 @@ async def api_service_start(request):
     if name not in ALLOWED_CONTROL:
         return json_resp({'ok': False, 'message': 'Not allowed'}, 403)
     try:
-        r = subprocess.run(['systemctl', 'start', name],
+        r = subprocess.run(['systemctl', 'enable', '--now', name],
                            capture_output=True, text=True, timeout=10)
         ok = r.returncode == 0
-        log.info('START %s → %s', name, 'ok' if ok else r.stderr.strip())
+        log.info('ENABLE+START %s → %s', name, 'ok' if ok else r.stderr.strip())
         return json_resp({'ok': ok, 'message': r.stderr.strip() or 'Started'})
     except Exception as e:
         return json_resp({'ok': False, 'message': str(e)}, 500)
@@ -236,13 +240,25 @@ async def api_service_stop(request):
     if name not in ALLOWED_CONTROL:
         return json_resp({'ok': False, 'message': 'Not allowed'}, 403)
     try:
-        r = subprocess.run(['systemctl', 'stop', name],
+        r = subprocess.run(['systemctl', 'disable', '--now', name],
                            capture_output=True, text=True, timeout=10)
         ok = r.returncode == 0
-        log.info('STOP %s → %s', name, 'ok' if ok else r.stderr.strip())
+        log.info('DISABLE+STOP %s → %s', name, 'ok' if ok else r.stderr.strip())
         return json_resp({'ok': ok, 'message': r.stderr.strip() or 'Stopped'})
     except Exception as e:
         return json_resp({'ok': False, 'message': str(e)}, 500)
+
+
+async def api_reboot(request):
+    log.info('Reboot requested')
+    subprocess.Popen(['systemctl', 'reboot'])
+    return json_resp({'ok': True, 'message': 'Rebooting…'})
+
+
+async def api_shutdown(request):
+    log.info('Shutdown requested')
+    subprocess.Popen(['systemctl', 'poweroff'])
+    return json_resp({'ok': True, 'message': 'Shutting down…'})
 
 
 async def api_db_info(request):
@@ -286,6 +302,8 @@ def build_app():
     app.router.add_post('/api/service/{name}/stop',  api_service_stop)
     app.router.add_get('/api/db',                   api_db_info)
     app.router.add_post('/api/db/{name}/clear',      api_db_clear)
+    app.router.add_post('/api/reboot',               api_reboot)
+    app.router.add_post('/api/shutdown',             api_shutdown)
     return app
 
 

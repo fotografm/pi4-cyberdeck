@@ -151,17 +151,36 @@ html, body { height: 100%; margin: 0; padding: 0; background: #080818; }
 </div>
 
 <script>
-// ── map init ──────────────────────────────────────────────────────────────────
-var map = L.map('map', {
-    center: [51.5, -0.1],
-    zoom: 6,
-    zoomControl: true,
-});
+// ── map init — fetch GPS first so we open at current location ─────────────────
+var map;
+var _tileLayer = '/tiles/{z}/{x}/{y}';
 
-L.tileLayer('/tiles/{z}/{x}/{y}', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
-    maxZoom: 19,
-}).addTo(map);
+function initMap(lat, lon, zoom) {
+    map = L.map('map', { center: [lat, lon], zoom: zoom, zoomControl: true });
+    L.tileLayer(_tileLayer, {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+        maxZoom: 19,
+    }).addTo(map);
+    if (lat !== 51.5) {
+        var dotIcon = L.divIcon({ html: '<div class="gps-dot"></div>',
+            className: '', iconSize: [14,14], iconAnchor: [7,7] });
+        gpsMarker = L.marker([lat, lon], { icon: dotIcon, zIndexOffset: 1000 });
+        gpsMarker.addTo(map);
+    }
+    loadAPs();
+    setInterval(loadAPs,   10000);
+    setInterval(updateGPS,  3000);
+}
+
+fetch('http://' + location.hostname + ':8093/api/gps')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        var lat = d.position && d.position.fix && d.position.lat;
+        var lon = d.position && d.position.fix && d.position.lon;
+        if (lat && lon) { initMap(lat, lon, 16); }
+        else            { initMap(51.5, -0.1, 6); }
+    })
+    .catch(function(){ initMap(51.5, -0.1, 6); });
 
 // ── marker colour by encryption ───────────────────────────────────────────────
 function encColour(enc) {
@@ -302,8 +321,8 @@ function updateGPS(forceView) {
     fetch('http://' + location.hostname + ':8093/api/gps')
         .then(function(r){ return r.json(); })
         .then(function(d){
-            var lat = d.position && d.fix && d.position.lat;
-            var lon = d.position && d.fix && d.position.lon;
+            var lat = d.position && d.position.fix && d.position.lat;
+            var lon = d.position && d.position.fix && d.position.lon;
             if (!lat || !lon) return;
 
             var latlng = [lat, lon];
@@ -329,11 +348,7 @@ style.textContent = '.ap-dark-popup .leaflet-popup-content-wrapper { background:
     '.ap-dark-popup .leaflet-popup-close-button { color:#7878aa !important; }';
 document.head.appendChild(style);
 
-// ── polling ───────────────────────────────────────────────────────────────────
-loadAPs();
-updateGPS();
-setInterval(loadAPs,  10000);
-setInterval(updateGPS, 3000);
+// polling started inside initMap after GPS fetch completes
 </script>
 </body>
 </html>
